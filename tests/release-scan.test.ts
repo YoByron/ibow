@@ -187,9 +187,14 @@ describe("export check", () => {
     }
     const removed = pruneExport(out);
     // The assistant's folder, found by its agents/ subfolder so this file doesn't name it.
-    const devDir = files.find((f) => /^\.[^/]+\/agents\//.test(f))?.split("/")[0] as string;
-    expect(removed).toContain(devDir);
-    expect(removed).toContain(`${devDir.slice(1).toUpperCase()}.md`);
+    // Present in the development repo only: the published tree has neither, and then there is nothing to prune.
+    const devDir = files.find((f) => /^\.[^/]+\/agents\//.test(f))?.split("/")[0];
+    if (devDir !== undefined) {
+      expect(removed).toContain(devDir);
+      expect(removed).toContain(`${devDir.slice(1).toUpperCase()}.md`);
+    } else {
+      expect(removed).toEqual([]);
+    }
     // Link placeholders are the only thing a pruned tree may still hold (none once set-links has run).
     const rulesLeft = scanTree(out, { export: true, commit: false }).map((f) => f.rule);
     expect(rulesLeft.filter((r) => r !== "link-placeholder")).toEqual([]);

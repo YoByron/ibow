@@ -649,3 +649,10 @@
   replaced the push-based Workers deploy workflow, which is gone: no secret ever sits in GitHub, and the server needs no
   inbound port because a Cloudflare Tunnel dials out. Shell scripts are checked with `bash -n` only; shellcheck's npm
   package downloads its binary from GitHub, which this project's tests do not do.
+- **D-060 2026-11-13 Releases after the first are ordinary commits made by `scripts/release-sync.sh`.** The export script makes
+  a fresh one-commit repository, which is right once and wrong for every change after it. `release-sync.sh <clone> "<message>"`
+  builds the same pruned, scanned tree, scans the message too, makes a clone of the public repository match it (deleting
+  vanished tracked files, never touching `.git` or ignored files) and commits as the release author or a no-reply identity,
+  or makes no commit when nothing changed. It cannot push or fetch. Tests that assume development-only files (the assistant
+  folder and its instructions) must hold in the published tree, where they do not exist, so they derive their expectation
+  from what is present.

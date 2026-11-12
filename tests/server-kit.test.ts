@@ -134,3 +134,25 @@ describe("ciState: a release is built only when CI concluded success", () => {
     }
   });
 });
+
+describe("the tunnel steps in the guide", () => {
+  const guide = readFileSync(join(dir, "../../docs/install.md"), "utf8");
+  const at = (s: string) => guide.indexOf(s);
+
+  test("create the tunnel, write its config, then route DNS with that config and the tunnel's id, and check the id in the output", () => {
+    const create = at("cloudflared tunnel create ibow");
+    const config = at("cp ~/ibow-src/deploy/server/cloudflared-ibow.yml.example ~/.cloudflared/ibow.yml");
+    const route = at("cloudflared --config ~/.cloudflared/ibow.yml tunnel route dns --overwrite-dns");
+    expect(create).toBeGreaterThan(-1);
+    expect(config).toBeGreaterThan(create);
+    expect(route).toBeGreaterThan(config);
+    expect(guide).toMatch(/route dns --overwrite-dns <TUNNEL-ID> ibow\.example\.com/);
+    expect(guide).toMatch(/tunnelID=/);
+    expect(guide).not.toMatch(/tunnel route dns ibow ibow\.example\.com/);
+  });
+
+  test("the tunnel unit names its config explicitly, and the example says why routing needs it", () => {
+    expect(read("cloudflared-ibow.service")).toMatch(/--config %h\/\.cloudflared\/ibow\.yml tunnel run/);
+    expect(read("cloudflared-ibow.yml.example")).toContain("--config");
+  });
+});

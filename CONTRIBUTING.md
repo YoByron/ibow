@@ -86,3 +86,22 @@ the AGPL-3.0. If you add a bundled asset (a font, an icon set, a library) add it
 
 Disagree with the code, not the person. A maintainer's time is the scarce resource: a small, tested, well-described pull
 request is the best way to spend it.
+
+## Maintainers: publishing to the public repository
+
+Changes reach the public repository as ordinary commits, never as a fresh repository. From a clone of the public repo
+(`git clone https://github.com/YoByron/ibow`, kept outside your working copy), with this repo committed and clean:
+
+```sh
+RELEASE_AUTHOR_NAME="Your Name" RELEASE_AUTHOR_EMAIL="you@users.noreply.github.com" \
+  bash scripts/release-sync.sh /path/to/public-clone "fix: a short message"
+cd /path/to/public-clone && npm ci && npm run gate    # the published tree must pass on its own
+git push                                              # by hand, when you are happy
+```
+
+`release-sync.sh` builds the committed tree without the development-only files, runs the release scans on it and on your
+message (it refuses if either fails), makes the clone's files match (deleting files that no longer exist, leaving `.git` and
+ignored files such as `node_modules` alone) and commits there. A run with nothing new makes no commit. It never pushes, fetches
+or adds a remote. If the author variables are not set it commits as a no-reply identity. Fill in the project links first with
+`npm run set-links` (the scan refuses leftover placeholders). `scripts/release-export.sh` is only for the very first, one-commit
+release.

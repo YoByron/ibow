@@ -443,13 +443,25 @@ One tunnel, one config file of its own (`~/.cloudflared/ibow.yml`), one unit. Lo
 
 ```sh
 cloudflared tunnel login                                   # opens a browser; pick the domain
-cloudflared tunnel create ibow                             # prints the tunnel id and writes ~/.cloudflared/<id>.json
-cloudflared tunnel route dns ibow ibow.example.com         # creates the DNS record for the hostname
+cloudflared tunnel create ibow                             # prints the tunnel id (a UUID) and writes ~/.cloudflared/<id>.json
 cp ~/ibow-src/deploy/server/cloudflared-ibow.yml.example ~/.cloudflared/ibow.yml
 ```
 
 Edit `~/.cloudflared/ibow.yml`: your home directory and the tunnel id in `credentials-file` (an absolute path, as `cloudflared tunnel create` printed it), and your hostname.
-The ingress sends that one hostname to `http://127.0.0.1:8790` and answers `404` for anything else. Then:
+The ingress sends that one hostname to `http://127.0.0.1:8790` and answers `404` for anything else.
+
+Only now create the DNS record, in this order and with these flags. `cloudflared` also reads a default `~/.cloudflared/config.yml`
+if you have one (an older tunnel on the same machine), and without `--config` `route dns` can attach the hostname to **that**
+tunnel instead of the new one, even when you name `ibow`. Passing this tunnel's own config and its id avoids it;
+`--overwrite-dns` replaces a record that was already created pointing at the wrong tunnel:
+
+```sh
+cloudflared --config ~/.cloudflared/ibow.yml tunnel route dns --overwrite-dns <TUNNEL-ID> ibow.example.com
+```
+
+**Check the tunnelID in the output.** It prints a line such as `Added CNAME ibow.example.com which will route to this tunnel
+tunnelID=<id>`; that id must be the one `tunnel create` printed. If it is another id, run the command again with the right
+`<TUNNEL-ID>`. Then:
 
 ```sh
 bash ~/ibow-src/deploy/server/install.sh        # again: it now finds the config and enables the tunnel unit
