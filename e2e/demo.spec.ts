@@ -53,7 +53,10 @@ test("npm run demo prints the URLs and PINs, and they open a seeded dashboard, c
   const proc = spawn(
     process.execPath,
     ["--disable-warning=ExperimentalWarning", "scripts/demo.ts", "--port", String(port), "--data", dataDir],
-    { cwd: root, env: { PATH: process.env.PATH ?? "", SYSTEMROOT: process.env.SYSTEMROOT ?? "" } },
+    {
+      cwd: root,
+      env: { PATH: process.env.PATH ?? "", SYSTEMROOT: process.env.SYSTEMROOT ?? "", IBOW_SKIP_BUILD: "1" },
+    },
   );
   child = proc;
   let out = "";

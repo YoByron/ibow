@@ -126,6 +126,18 @@ export function freePort(): Promise<number> {
   });
 }
 
+/**
+ * Whether to skip building the client: only when `IBOW_SKIP_BUILD=1` is set and a built client is already there. The
+ * browser tests build once in their global setup and set it, so several demos starting at once never rebuild (and so
+ * never delete) the folder another server is reading.
+ */
+export function clientBuildSkipped(
+  env: Readonly<Record<string, string | undefined>>,
+  clientDir = join(root, "dist/client"),
+): boolean {
+  return env.IBOW_SKIP_BUILD === "1" && existsSync(join(clientDir, "index.html"));
+}
+
 export interface RunningDemo extends PreparedDemo {
   base: string;
   urls: { storefront: string; kiosk: string; staff: string; owner: string };
@@ -155,7 +167,9 @@ export async function startDemo(opts: {
   const temp = opts.dataDir === undefined;
   const dataDir = opts.dataDir ?? mkdtempSync(join(tmpdir(), "ibow-demo-"));
   const prepared = await prepareDemo({ sample: opts.sample ?? "tea-house", dataDir, now: opts.now ?? Date.now() });
-  if (opts.quiet) {
+  if (clientBuildSkipped(process.env)) {
+    // built already, once, by the caller
+  } else if (opts.quiet) {
     const log = console.log;
     console.log = () => {};
     try {

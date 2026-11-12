@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
@@ -157,5 +157,54 @@ describe("the showcase through createApp (Node)", () => {
     expect(await status({})).toBe(404);
     expect(await status({ demo: true })).toBe(200);
     expect(await status({ showcase: true })).toBe(200);
+  });
+});
+
+describe("loadClient while the client is being rebuilt", () => {
+  const enoent = (path: string) =>
+    Object.assign(new Error(`ENOENT: no such file or directory, stat '${path}'`), { code: "ENOENT" });
+
+  test("retries once when a file vanishes between listing and reading it, then serves the whole build", () => {
+    let thrown = 0;
+    let failedOnce = false;
+    const ops = {
+      readdirSync,
+      readFileSync,
+      statSync: ((path: string) => {
+        if (String(path).endsWith("app.js") && !failedOnce) {
+          failedOnce = true;
+          thrown++;
+          throw enoent(String(path));
+        }
+        return statSync(path);
+      }) as typeof statSync,
+    };
+    const client = loadClient(dir, ops);
+    expect(thrown).toBe(1);
+    expect(client.files.has("/app.js")).toBe(true);
+    expect(client.files.has("/index.html")).toBe(true);
+  });
+
+  test("a file that stays missing fails loudly: what was expected, what vanished, and what to do", () => {
+    const ops = {
+      readdirSync,
+      readFileSync,
+      statSync: ((path: string) => {
+        if (String(path).endsWith("app.js")) throw enoent(String(path));
+        return statSync(path);
+      }) as typeof statSync,
+    };
+    expect(() => loadClient(dir, ops)).toThrow(/expected a complete client build.*app\.js.*run npm run build/s);
+  });
+
+  test("an error that is not a vanished file is not retried or hidden", () => {
+    const ops = {
+      readdirSync,
+      readFileSync,
+      statSync: (() => {
+        throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+      }) as unknown as typeof statSync,
+    };
+    expect(() => loadClient(dir, ops)).toThrow("EACCES");
   });
 });

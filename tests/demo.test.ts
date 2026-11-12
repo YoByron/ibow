@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
-import { aiEnv, prepareDemo } from "../scripts/demo.ts";
+import { aiEnv, clientBuildSkipped, prepareDemo } from "../scripts/demo.ts";
 import { dailyReport } from "../src/core/insights.ts";
 import { dayKey } from "../src/core/tokens.ts";
 import { type DemoRush, seedDemo } from "../src/demo/seed.ts";
@@ -256,4 +256,15 @@ test("the demo passes the AI_ settings through from its own environment, and not
     }),
   ).toEqual({ AI_BASE_URL: "http://127.0.0.1:11434/v1", AI_MODEL: "llama3.2", AI_TIMEOUT_SECONDS: "120" });
   expect(aiEnv({})).toEqual({});
+});
+
+describe("skipping the client build", () => {
+  test("only IBOW_SKIP_BUILD=1 with a built client skips it", () => {
+    const dir = tempDir();
+    expect(clientBuildSkipped({ IBOW_SKIP_BUILD: "1" }, dir)).toBe(false);
+    writeFileSync(join(dir, "index.html"), "<!doctype html>");
+    expect(clientBuildSkipped({ IBOW_SKIP_BUILD: "1" }, dir)).toBe(true);
+    expect(clientBuildSkipped({}, dir)).toBe(false);
+    expect(clientBuildSkipped({ IBOW_SKIP_BUILD: "0" }, dir)).toBe(false);
+  });
 });

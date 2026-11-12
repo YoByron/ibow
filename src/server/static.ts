@@ -52,27 +52,56 @@ const PAGES: Readonly<Record<string, string>> = {
 };
 const COMPRESS = new Set([".html", ".js", ".css", ".webmanifest", ".svg"]);
 
-export function loadClient(dir: string): ClientFiles {
+/** The file operations loadClient uses; a test replaces them to make a file vanish mid-walk. */
+export interface ClientFs {
+  readdirSync: typeof readdirSync;
+  statSync: typeof statSync;
+  readFileSync: typeof readFileSync;
+}
+const REAL_FS: ClientFs = { readdirSync, statSync, readFileSync };
+
+/**
+ * Reads the built client into memory. A build swaps its folder in whole, but a reader that began just before the swap can
+ * still find a file gone between listing it and reading it; that is retried once from the start, and if it persists the
+ * error says what vanished.
+ */
+export function loadClient(dir: string, fs: ClientFs = REAL_FS): ClientFiles {
+  try {
+    return readClient(dir, fs);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
+  try {
+    return readClient(dir, fs);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    throw new Error(
+      `ibow: expected a complete client build in ${dir}, found a file vanishing while it was read twice (${(e as Error).message}); a build may be running, wait for it and run npm run build if it is not`,
+    );
+  }
+}
+
+function readClient(dir: string, fs: ClientFs): ClientFiles {
   if (!existsSync(join(dir, "index.html"))) {
     throw new Error(`ibow: expected the built client in ${dir}, found no index.html; run npm run build`);
   }
   let build: string;
   try {
-    build = readFileSync(join(dir, "build.txt"), "utf8").trim();
+    build = fs.readFileSync(join(dir, "build.txt"), "utf8").trim();
   } catch {
     throw new Error(`ibow: expected ${join(dir, "build.txt")} from the client build, found none; run npm run build`);
   }
   const files = new Map<string, ClientFile>();
   const walk = (rel: string): void => {
-    for (const name of readdirSync(join(dir, rel))) {
+    for (const name of fs.readdirSync(join(dir, rel))) {
       const path = join(dir, rel, name);
-      if (statSync(path).isDirectory()) {
+      if (fs.statSync(path).isDirectory()) {
         walk(rel === "" ? name : `${rel}/${name}`);
         continue;
       }
       const type = TYPES[extname(name)];
       if (type === undefined) continue;
-      const body = readFileSync(path);
+      const body = fs.readFileSync(path);
       const file = asFile(body, type);
       if (COMPRESS.has(extname(name)) && body.length > 1024) file.gzip = gzipSync(body, { level: 9 });
       files.set(`/${rel === "" ? "" : `${rel}/`}${name}`, file);
