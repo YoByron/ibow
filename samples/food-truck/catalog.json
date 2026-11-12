@@ -1,0 +1,107 @@
+{
+  "categories": [
+    {
+      "id": "grill",
+      "name": "From the Grill",
+      "icon": "hamburger",
+      "items": [
+        {
+          "id": "paneer-tikka-wrap",
+          "name": "Paneer Tikka Wrap",
+          "price": 18000
+        },
+        {
+          "id": "chicken-tikka-wrap",
+          "name": "Chicken Tikka Wrap",
+          "price": 22000
+        },
+        {
+          "id": "grilled-veg-burger",
+          "name": "Grilled Veg Burger",
+          "icon": "hamburger",
+          "price": 16000
+        },
+        {
+          "id": "smash-chicken-burger",
+          "name": "Smash Chicken Burger",
+          "icon": "hamburger",
+          "price": 24000
+        },
+        {
+          "id": "corn-on-the-cob",
+          "name": "Corn on the Cob",
+          "price": 9000,
+          "available": false
+        }
+      ]
+    },
+    {
+      "id": "fried",
+      "name": "Fried",
+      "icon": "french_fries",
+      "items": [
+        {
+          "id": "fries",
+          "name": "Fries",
+          "icon": "french_fries",
+          "variants": [
+            {
+              "size": "Regular",
+              "price": 9000
+            },
+            {
+              "size": "Large",
+              "price": 13000
+            }
+          ]
+        },
+        {
+          "id": "onion-rings",
+          "name": "Onion Rings",
+          "price": 11000
+        },
+        {
+          "id": "chicken-strips",
+          "name": "Chicken Strips",
+          "price": 19000
+        },
+        {
+          "id": "veg-fritters",
+          "name": "Veg Fritters",
+          "price": 10000
+        }
+      ]
+    },
+    {
+      "id": "drinks",
+      "name": "Drinks",
+      "icon": "beverage_box",
+      "items": [
+        {
+          "id": "lemonade",
+          "name": "Lemonade",
+          "variants": [
+            {
+              "size": "M",
+              "price": 7000
+            },
+            {
+              "size": "L",
+              "price": 9000
+            }
+          ]
+        },
+        {
+          "id": "mango-shake",
+          "name": "Mango Shake",
+          "price": 12000
+        },
+        {
+          "id": "bottled-water",
+          "name": "Bottled Water",
+          "price": 2000
+        }
+      ]
+    }
+  ]
+}

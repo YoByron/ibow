@@ -1,0 +1,30 @@
+{
+  "colors": {
+    "primary": "#c8864b",
+    "accent": "#e8b04a",
+    "header": "#1d130e",
+    "light": {
+      "surface": "#f4ece3",
+      "text": "#241811"
+    },
+    "dark": {
+      "surface": "#150f0b",
+      "text": "#f3e9de"
+    }
+  },
+  "font": "lora",
+  "radius": "soft",
+  "density": "comfortable",
+  "header": {
+    "style": "plain"
+  },
+  "logo": "hot_beverage",
+  "features": {
+    "favourites": true,
+    "recent": true,
+    "tags": "catalog",
+    "veg": false,
+    "darkToggle": true,
+    "cartEta": false
+  }
+}

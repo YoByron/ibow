@@ -1,0 +1,9 @@
+[
+  {
+    "id": "pack",
+    "name": "Packing Table",
+    "categories": ["breads", "cakes", "cookies", "savouries"],
+    "speak": true,
+    "print": "ticket-80mm"
+  }
+]

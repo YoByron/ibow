@@ -1,0 +1,12 @@
+# One pull-based update: fetch main, build it if CI passed, smoke-test it, switch, roll back on failure.
+[Unit]
+Description=ibow update (pull, build, smoke-test, switch)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/apps/ibow/bin/update.sh
+TimeoutStartSec=30min
+NoNewPrivileges=true
+UMask=0077

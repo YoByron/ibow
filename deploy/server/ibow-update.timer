@@ -1,0 +1,10 @@
+[Unit]
+Description=Look for a new ibow release every 5 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=5min
+RandomizedDelaySec=60s
+
+[Install]
+WantedBy=timers.target

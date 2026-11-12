@@ -1,0 +1,10 @@
+{
+  "tagline": "Request a service, follow it with your ticket",
+  "yourOrder": "Your request",
+  "placeOrder": "Submit request",
+  "yourToken": "Your ticket",
+  "trackTitle": "Track request",
+  "statusPending": "Request received",
+  "statusPreparing": "Being worked on",
+  "statusCompleted": "Done! Please collect it."
+}

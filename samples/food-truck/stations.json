@@ -1,0 +1,5 @@
+[
+  { "id": "grill", "name": "Grill", "categories": ["grill"], "speak": true, "print": "ticket-80mm" },
+  { "id": "fryer", "name": "Fryer", "categories": ["fried"], "speak": true, "print": null },
+  { "id": "drinks", "name": "Drinks", "categories": ["drinks"], "speak": true, "print": null }
+]

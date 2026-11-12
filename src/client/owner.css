@@ -1,0 +1,37 @@
+/* The owner's dashboard only, on top of style.css and staff.css. Tokens only. */
+
+/* all four bundled typefaces, so the Appearance preview can show any of them */
+@font-face{font-family:"ibow-inter";src:url(/assets/fonts/inter.woff2) format("woff2");font-weight:100 900;font-display:swap}
+@font-face{font-family:"ibow-lora";src:url(/assets/fonts/lora.woff2) format("woff2");font-weight:100 900;font-display:swap}
+@font-face{font-family:"ibow-nunito";src:url(/assets/fonts/nunito.woff2) format("woff2");font-weight:100 900;font-display:swap}
+@font-face{font-family:"ibow-space-grotesk";src:url(/assets/fonts/space-grotesk.woff2) format("woff2");font-weight:100 900;font-display:swap}
+
+.analyst{background:var(--card);border-radius:var(--r-card);box-shadow:var(--sh-1);padding:var(--sp-4);margin-top:var(--sp-4)}
+.analyst h2{margin-top:0}
+.analyst .login{margin:var(--sp-3) 0}
+mark.unbacked{background:var(--warn-soft);color:var(--warn-text);border-radius:4px;padding:0 3px;outline:2px solid var(--warn)}
+.owner .login{max-width:560px}
+
+/* Appearance */
+.appearance{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:var(--sp-4);align-items:start}
+.appearance-form{display:flex;flex-direction:column;gap:var(--sp-3)}
+.appearance-form .card{display:flex;flex-direction:column;gap:var(--sp-3)}
+.appearance-form h2{margin:0}
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(11rem,1fr));gap:var(--sp-3)}
+.swatch{display:flex;align-items:center;gap:var(--sp-2);font-weight:600;font-size:13px}
+.swatch input[type=color]{width:44px;height:44px;padding:0;border:1.5px solid var(--line);border-radius:var(--r-ctl);background:var(--card);cursor:pointer;flex:none}
+.check{display:flex;align-items:center;gap:var(--sp-2);min-height:36px;font-weight:600}
+.check input{width:20px;height:20px;accent-color:var(--primary)}
+.appearance .field select{min-height:var(--ctl-h);padding:0 12px;border-radius:var(--r-ctl);border:1.5px solid var(--line);background:var(--card)}
+.contrast-bad{background:var(--warn-soft);border:1.5px solid var(--warn);border-radius:var(--r-panel);padding:var(--sp-3);color:var(--ink)}
+.contrast-bad p{font-weight:700;margin-bottom:var(--sp-2)}
+.preview-col{position:sticky;top:var(--sp-3)}
+.preview-col .chips{margin-top:0}
+.preview{position:relative;width:390px;max-width:100%;height:640px;overflow:hidden;border-radius:var(--r-sheet);border:6px solid var(--ink);background:var(--bg);color:var(--ink);font-family:var(--font);font-size:var(--fs)}
+.preview .shell{min-height:0;height:100%;overflow:hidden;padding-bottom:0}
+.preview .cartbar,.preview .tabs{position:absolute}
+.preview .cartbar{bottom:82px;left:12px;right:12px}
+.preview .rail{position:static}
+.preview .item{pointer-events:none}
+.preview a{pointer-events:none}
+@media (max-width:900px){.appearance{grid-template-columns:1fr}.preview-col{position:static}.preview{margin:0 auto}}

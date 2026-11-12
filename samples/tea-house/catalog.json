@@ -1,0 +1,739 @@
+{
+  "categories": [
+    {
+      "id": "tea-coffee",
+      "name": "Tea / Coffee",
+      "icon": "hot_beverage",
+      "items": [
+        {
+          "id": "house-special-chai",
+          "name": "House Special Chai",
+          "icon": "hot_beverage",
+          "variants": [
+            {
+              "size": "S",
+              "price": 2000
+            },
+            {
+              "size": "M",
+              "price": 3000
+            },
+            {
+              "size": "L",
+              "price": 4000
+            }
+          ],
+          "description": "Slow-brewed masala chai with fresh ginger and cardamom."
+        },
+        {
+          "id": "butter-scotch-tea",
+          "name": "Butter Scotch Tea",
+          "icon": "teacup_without_handle",
+          "variants": [
+            {
+              "size": "S",
+              "price": 2500
+            },
+            {
+              "size": "M",
+              "price": 4000
+            },
+            {
+              "size": "L",
+              "price": 5000
+            }
+          ],
+          "description": "Silky tea finished with a caramel butterscotch swirl."
+        },
+        {
+          "id": "rose-tea",
+          "name": "Rose Tea",
+          "icon": "teapot",
+          "variants": [
+            {
+              "size": "S",
+              "price": 2500
+            },
+            {
+              "size": "M",
+              "price": 4000
+            },
+            {
+              "size": "L",
+              "price": 5000
+            }
+          ],
+          "description": "Fragrant rose petals steeped into a light, floral cup."
+        },
+        {
+          "id": "paan-tea",
+          "name": "Paan Tea",
+          "icon": "leaf_fluttering_in_wind",
+          "variants": [
+            {
+              "size": "S",
+              "price": 2500
+            },
+            {
+              "size": "M",
+              "price": 4000
+            },
+            {
+              "size": "L",
+              "price": 5000
+            }
+          ],
+          "description": "Betel leaf, gulkand and fennel in a cooling sweet cup."
+        },
+        {
+          "id": "chocolate-tea",
+          "name": "Chocolate Tea",
+          "icon": "hot_beverage",
+          "variants": [
+            {
+              "size": "S",
+              "price": 2500
+            },
+            {
+              "size": "M",
+              "price": 4000
+            },
+            {
+              "size": "L",
+              "price": 5000
+            }
+          ],
+          "description": "Strong tea with melted dark chocolate."
+        },
+        {
+          "id": "kesar-elaichi-tea",
+          "name": "Kesar Elaichi Tea",
+          "icon": "sparkles",
+          "variants": [
+            {
+              "size": "S",
+              "price": 3000
+            },
+            {
+              "size": "M",
+              "price": 5000
+            },
+            {
+              "size": "L",
+              "price": 6000
+            }
+          ],
+          "description": "Saffron and green cardamom in a golden, aromatic cup."
+        },
+        {
+          "id": "hot-coffee",
+          "name": "Hot Coffee",
+          "icon": "hot_beverage",
+          "variants": [
+            {
+              "size": "S",
+              "price": 2500
+            },
+            {
+              "size": "M",
+              "price": 4000
+            },
+            {
+              "size": "L",
+              "price": 5000
+            }
+          ],
+          "description": "Fresh milk coffee, hot and frothy."
+        },
+        {
+          "id": "cold-coffee",
+          "name": "Cold Coffee",
+          "icon": "ice",
+          "price": 6000,
+          "description": "Chilled milk coffee blended thick over ice."
+        },
+        {
+          "id": "cold-butter-scotch-tea",
+          "name": "Cold Butter Scotch Tea",
+          "icon": "ice",
+          "price": 6000,
+          "description": "Iced butter scotch tea, poured over crushed ice."
+        },
+        {
+          "id": "cold-rose-tea",
+          "name": "Cold Rose Tea",
+          "icon": "ice",
+          "price": 6000,
+          "description": "Iced rose tea, poured over crushed ice."
+        },
+        {
+          "id": "cold-paan-tea",
+          "name": "Cold Paan Tea",
+          "icon": "ice",
+          "price": 6000,
+          "description": "Iced paan tea, poured over crushed ice."
+        },
+        {
+          "id": "cold-chocolate-tea",
+          "name": "Cold Chocolate Tea",
+          "icon": "ice",
+          "price": 6000,
+          "description": "Iced chocolate tea, poured over crushed ice."
+        },
+        {
+          "id": "cold-kesar-elaichi-tea",
+          "name": "Cold Kesar Elaichi Tea",
+          "icon": "ice",
+          "price": 7000,
+          "description": "Iced kesar elaichi tea, poured over crushed ice."
+        }
+      ]
+    },
+    {
+      "id": "ice-tea",
+      "name": "Ice Tea",
+      "icon": "ice",
+      "items": [
+        {
+          "id": "lemon-ice-tea",
+          "name": "Lemon Ice Tea",
+          "icon": "ice",
+          "price": 4000,
+          "description": "Black tea, lemon and ice, crisp and tart."
+        },
+        {
+          "id": "peach-ice-tea",
+          "name": "Peach Ice Tea",
+          "icon": "ice",
+          "price": 4000,
+          "description": "Cold tea with ripe peach and a hint of honey."
+        },
+        {
+          "id": "red-wine-ice-tea",
+          "name": "Red Wine Ice Tea",
+          "icon": "cocktail_glass",
+          "price": 5000,
+          "description": "Berry-red iced tea with a tangy grape finish, no alcohol."
+        }
+      ]
+    },
+    {
+      "id": "soda",
+      "name": "Soda",
+      "icon": "cup_with_straw",
+      "items": [
+        {
+          "id": "fresh-lemon-soda",
+          "name": "Fresh Lemon Soda",
+          "icon": "lemon",
+          "price": 3000,
+          "description": "Fresh lemon, sugar and salt topped with soda."
+        },
+        {
+          "id": "masala-soda",
+          "name": "Masala Soda",
+          "icon": "cup_with_straw",
+          "price": 3000,
+          "description": "Soda with roasted cumin, black salt and spice."
+        },
+        {
+          "id": "amla-panna",
+          "name": "Amla Panna",
+          "icon": "leaf_fluttering_in_wind",
+          "price": 4000,
+          "description": "Tangy gooseberry cooler with a pinch of spice."
+        }
+      ]
+    },
+    {
+      "id": "mocktails",
+      "name": "Mocktails",
+      "icon": "tropical_drink",
+      "items": [
+        {
+          "id": "classic-mint-mojito",
+          "name": "Classic Mint Mojito",
+          "icon": "leaf_fluttering_in_wind",
+          "price": 6000,
+          "description": "Classic Mint Mojito: a fresh, fizzy cooler with muddled fruit and ice."
+        },
+        {
+          "id": "green-apple-mojito",
+          "name": "Green Apple Mojito",
+          "icon": "lemon",
+          "price": 8000,
+          "description": "Green Apple Mojito: a fresh, fizzy cooler with muddled fruit and ice."
+        },
+        {
+          "id": "water-melon-mojito",
+          "name": "Water Melon Mojito",
+          "icon": "watermelon",
+          "price": 8000,
+          "description": "Water Melon Mojito: a fresh, fizzy cooler with muddled fruit and ice."
+        },
+        {
+          "id": "blue-lagoon-mojito",
+          "name": "Blue Lagoon Mojito",
+          "icon": "tropical_drink",
+          "price": 8000,
+          "description": "Blue Lagoon Mojito: a fresh, fizzy cooler with muddled fruit and ice."
+        },
+        {
+          "id": "chilli-guava-mojito",
+          "name": "Chilli Guava Mojito",
+          "icon": "peach",
+          "price": 8000,
+          "description": "Chilli Guava Mojito: a fresh, fizzy cooler with muddled fruit and ice."
+        },
+        {
+          "id": "fruit-beer",
+          "name": "Fruit Beer",
+          "icon": "beverage_box",
+          "price": 5000,
+          "description": "Sparkling fruit drink served ice cold, no alcohol."
+        }
+      ]
+    },
+    {
+      "id": "instant-noodles",
+      "name": "Instant Noodles",
+      "icon": "pot_of_food",
+      "items": [
+        {
+          "id": "plain-instant-noodles",
+          "name": "Plain Instant Noodles",
+          "icon": "pot_of_food",
+          "price": 5000,
+          "description": "Instant noodles cooked in a spiced broth, plain style."
+        },
+        {
+          "id": "veg-instant-noodles",
+          "name": "Veg Instant Noodles",
+          "icon": "pot_of_food",
+          "price": 7000,
+          "description": "Instant noodles cooked in a spiced broth, veg style."
+        },
+        {
+          "id": "cheese-instant-noodles",
+          "name": "Cheese Instant Noodles",
+          "icon": "pot_of_food",
+          "price": 8000,
+          "description": "Instant noodles cooked in a spiced broth, cheese style."
+        },
+        {
+          "id": "tandoori-instant-noodles",
+          "name": "Tandoori Instant Noodles",
+          "icon": "pot_of_food",
+          "price": 9000,
+          "description": "Instant noodles cooked in a spiced broth, tandoori style."
+        }
+      ]
+    },
+    {
+      "id": "sweet-corn",
+      "name": "Sweet Corn",
+      "icon": "ear_of_corn",
+      "items": [
+        {
+          "id": "sweet-corn",
+          "name": "Sweet Corn",
+          "icon": "ear_of_corn",
+          "price": 4000,
+          "description": "Hot sweet corn tossed with butter and salt."
+        },
+        {
+          "id": "masala-sweet-corn",
+          "name": "Masala Sweet Corn",
+          "icon": "ear_of_corn",
+          "price": 5000,
+          "description": "Hot sweet corn tossed with butter and masala."
+        },
+        {
+          "id": "peri-peri-sweet-corn",
+          "name": "Peri Peri Sweet Corn",
+          "icon": "ear_of_corn",
+          "price": 6000,
+          "description": "Hot sweet corn tossed with butter and peri."
+        },
+        {
+          "id": "cheese-sweet-corn",
+          "name": "Cheese Sweet Corn",
+          "icon": "ear_of_corn",
+          "price": 7000,
+          "description": "Hot sweet corn tossed with butter and cheese."
+        }
+      ]
+    },
+    {
+      "id": "snacks",
+      "name": "Snacks",
+      "icon": "bento_box",
+      "items": [
+        {
+          "id": "bun-maska",
+          "name": "Bun Maska",
+          "icon": "croissant",
+          "price": 2500,
+          "description": "Bun Maska: hot, crisp and served with a tangy dip."
+        },
+        {
+          "id": "butter-toast",
+          "name": "Butter Toast",
+          "icon": "sandwich",
+          "price": 2500,
+          "description": "Butter Toast: hot, crisp and served with a tangy dip."
+        },
+        {
+          "id": "cheese-toast",
+          "name": "Cheese Toast",
+          "icon": "sandwich",
+          "price": 3500,
+          "description": "Cheese Toast: hot, crisp and served with a tangy dip."
+        },
+        {
+          "id": "potato-balls",
+          "name": "Potato Balls",
+          "icon": "fire",
+          "price": 6000,
+          "description": "Potato Balls: hot, crisp and served with a tangy dip."
+        },
+        {
+          "id": "spring-roll",
+          "name": "Spring Roll",
+          "icon": "bento_box",
+          "price": 7000,
+          "description": "Spring Roll: hot, crisp and served with a tangy dip."
+        },
+        {
+          "id": "crispy-spring-roll",
+          "name": "Crispy Spring Roll",
+          "icon": "bento_box",
+          "price": 8000,
+          "description": "Crispy Spring Roll: hot, crisp and served with a tangy dip."
+        },
+        {
+          "id": "garlic-bread",
+          "name": "Garlic Bread",
+          "icon": "croissant",
+          "price": 8000,
+          "description": "Garlic Bread: hot, crisp and served with a tangy dip."
+        },
+        {
+          "id": "veg-nuggets",
+          "name": "Veg Nuggets",
+          "icon": "takeout_box",
+          "price": 8000,
+          "description": "Veg Nuggets: hot, crisp and served with a tangy dip."
+        },
+        {
+          "id": "veg-finger",
+          "name": "Veg Finger",
+          "icon": "takeout_box",
+          "price": 8000,
+          "description": "Veg Finger: hot, crisp and served with a tangy dip."
+        },
+        {
+          "id": "paneer-finger",
+          "name": "Paneer Finger",
+          "icon": "takeout_box",
+          "price": 10000,
+          "description": "Paneer Finger: hot, crisp and served with a tangy dip."
+        },
+        {
+          "id": "cheese-balls",
+          "name": "Cheese Balls",
+          "icon": "cheese_wedge",
+          "price": 10000,
+          "description": "Cheese Balls: hot, crisp and served with a tangy dip."
+        }
+      ]
+    },
+    {
+      "id": "fries",
+      "name": "Fries",
+      "icon": "french_fries",
+      "items": [
+        {
+          "id": "salted-fries",
+          "name": "Salted Fries",
+          "icon": "french_fries",
+          "price": 6000,
+          "description": "Golden fries with sea salt."
+        },
+        {
+          "id": "masala-fries",
+          "name": "Masala Fries",
+          "icon": "french_fries",
+          "price": 6000,
+          "description": "Golden fries with masala seasoning."
+        },
+        {
+          "id": "peri-peri-fries",
+          "name": "Peri Peri Fries",
+          "icon": "french_fries",
+          "price": 8000,
+          "description": "Golden fries with peri seasoning."
+        },
+        {
+          "id": "cheese-fries",
+          "name": "Cheese Fries",
+          "icon": "cheese_wedge",
+          "price": 8000,
+          "description": "Golden fries with cheese seasoning."
+        },
+        {
+          "id": "loaded-fries",
+          "name": "Loaded Fries",
+          "icon": "french_fries",
+          "price": 10000,
+          "description": "Golden fries with loaded seasoning."
+        }
+      ]
+    },
+    {
+      "id": "noodles",
+      "name": "Noodles",
+      "icon": "steaming_bowl",
+      "items": [
+        {
+          "id": "veg-noodles",
+          "name": "Veg Noodles",
+          "icon": "steaming_bowl",
+          "price": 8000,
+          "description": "Wok-tossed noodles with crunchy vegetables, veg style."
+        },
+        {
+          "id": "chilly-garlic-noodles",
+          "name": "Chilly Garlic Noodles",
+          "icon": "steaming_bowl",
+          "price": 9000,
+          "description": "Wok-tossed noodles with crunchy vegetables, chilly style."
+        },
+        {
+          "id": "singapori-noodles",
+          "name": "Singapori Noodles",
+          "icon": "steaming_bowl",
+          "price": 12000,
+          "description": "Wok-tossed noodles with crunchy vegetables, singapori style."
+        },
+        {
+          "id": "cheese-noodles",
+          "name": "Cheese Noodles",
+          "icon": "steaming_bowl",
+          "price": 12000,
+          "description": "Wok-tossed noodles with crunchy vegetables, cheese style."
+        }
+      ]
+    },
+    {
+      "id": "chinese",
+      "name": "Chinese",
+      "icon": "takeout_box",
+      "items": [
+        {
+          "id": "manchurian-dry",
+          "name": "Manchurian Dry",
+          "icon": "hot_pepper",
+          "price": 10000,
+          "description": "Manchurian Dry: crisp, glazed and tossed with peppers."
+        },
+        {
+          "id": "chilly-potato",
+          "name": "Chilly Potato",
+          "icon": "hot_pepper",
+          "price": 10000,
+          "description": "Chilly Potato: crisp, glazed and tossed with peppers."
+        },
+        {
+          "id": "honey-chilly-potato",
+          "name": "Honey Chilly Potato",
+          "icon": "hot_pepper",
+          "price": 12000,
+          "description": "Honey Chilly Potato: crisp, glazed and tossed with peppers."
+        }
+      ]
+    },
+    {
+      "id": "momos",
+      "name": "Momos",
+      "icon": "dumpling",
+      "items": [
+        {
+          "id": "veg-momos-sf",
+          "name": "Veg Momos S/F",
+          "icon": "dumpling",
+          "price": 6000,
+          "description": "Steamed dumplings with mixed vegetable filling, and a spicy dip."
+        },
+        {
+          "id": "veg-crunchy-momos",
+          "name": "Veg Crunchy Momos",
+          "icon": "dumpling",
+          "price": 7000,
+          "description": "Crisp-fried dumplings with mixed vegetable filling, and a spicy dip."
+        },
+        {
+          "id": "paneer-momos-sf",
+          "name": "Paneer Momos S/F",
+          "icon": "dumpling",
+          "price": 8000,
+          "description": "Steamed dumplings with soft paneer filling, and a spicy dip."
+        },
+        {
+          "id": "paneer-crunchy-momos",
+          "name": "Paneer Crunchy Momos",
+          "icon": "dumpling",
+          "price": 10000,
+          "description": "Crisp-fried dumplings with soft paneer filling, and a spicy dip."
+        },
+        {
+          "id": "cheese-corn-sf",
+          "name": "Cheese Corn S/F",
+          "icon": "dumpling",
+          "price": 8000,
+          "description": "Steamed dumplings with cheese and sweet corn filling, and a spicy dip."
+        },
+        {
+          "id": "cheese-corn-crunchy",
+          "name": "Cheese Corn Crunchy",
+          "icon": "dumpling",
+          "price": 10000,
+          "description": "Crisp-fried dumplings with cheese and sweet corn filling, and a spicy dip."
+        },
+        {
+          "id": "veg-tandoori-momos",
+          "name": "Veg Tandoori Momos",
+          "icon": "dumpling",
+          "price": 10000,
+          "description": "Steamed dumplings with mixed vegetable filling, tossed in tandoori masala, and a spicy dip."
+        },
+        {
+          "id": "veg-ragda-momos",
+          "name": "Veg Ragda Momos",
+          "icon": "dumpling",
+          "price": 12000,
+          "description": "Steamed dumplings with mixed vegetable filling, served over ragda, and a spicy dip."
+        },
+        {
+          "id": "paneer-tandoori-momos",
+          "name": "Paneer Tandoori Momos",
+          "icon": "dumpling",
+          "price": 12000,
+          "description": "Steamed dumplings with soft paneer filling, tossed in tandoori masala, and a spicy dip."
+        },
+        {
+          "id": "paneer-ragda-momos",
+          "name": "Paneer Ragda Momos",
+          "icon": "dumpling",
+          "price": 15000,
+          "description": "Steamed dumplings with soft paneer filling, served over ragda, and a spicy dip."
+        }
+      ]
+    },
+    {
+      "id": "pasta",
+      "name": "Pasta",
+      "icon": "spaghetti",
+      "items": [
+        {
+          "id": "red-sauce-pasta",
+          "name": "Red Sauce Pasta",
+          "icon": "spaghetti",
+          "price": 10000,
+          "description": "Penne in a red sauce sauce with herbs."
+        },
+        {
+          "id": "white-sauce-pasta",
+          "name": "White Sauce Pasta",
+          "icon": "spaghetti",
+          "price": 10000,
+          "description": "Penne in a white sauce sauce with herbs."
+        },
+        {
+          "id": "tandoori-pasta",
+          "name": "Tandoori Pasta",
+          "icon": "spaghetti",
+          "price": 10000,
+          "description": "Penne in a tandoori sauce with herbs."
+        },
+        {
+          "id": "mix-sauce-pasta",
+          "name": "Mix Sauce Pasta",
+          "icon": "spaghetti",
+          "price": 12000,
+          "description": "Penne in a mix sauce sauce with herbs."
+        }
+      ]
+    },
+    {
+      "id": "burger",
+      "name": "Burger",
+      "icon": "hamburger",
+      "items": [
+        {
+          "id": "aloo-tikki-burger",
+          "name": "Aloo Tikki Burger",
+          "icon": "hamburger",
+          "price": 4000,
+          "description": "Toasted bun, crisp patty, fresh salad and house sauce."
+        },
+        {
+          "id": "veg-burger",
+          "name": "Veg Burger",
+          "icon": "hamburger",
+          "price": 5000,
+          "description": "Toasted bun, crisp patty, fresh salad and house sauce."
+        },
+        {
+          "id": "paneer-burger",
+          "name": "Paneer Burger",
+          "icon": "hamburger",
+          "price": 8000,
+          "description": "Toasted bun, crisp patty, fresh salad and house sauce."
+        }
+      ]
+    },
+    {
+      "id": "sandwich",
+      "name": "Sandwich",
+      "icon": "sandwich",
+      "items": [
+        {
+          "id": "veg-sandwich",
+          "name": "Veg Sandwich",
+          "icon": "sandwich",
+          "price": 4000,
+          "description": "Grilled sandwich with veg filling."
+        },
+        {
+          "id": "tandoori-sandwich",
+          "name": "Tandoori Sandwich",
+          "icon": "sandwich",
+          "price": 5000,
+          "description": "Grilled sandwich with tandoori filling."
+        },
+        {
+          "id": "cheese-onion-sandwich",
+          "name": "Cheese Onion Sandwich",
+          "icon": "sandwich",
+          "price": 5000,
+          "description": "Grilled sandwich with cheese onion filling."
+        },
+        {
+          "id": "cheese-corn-sandwich",
+          "name": "Cheese Corn Sandwich",
+          "icon": "sandwich",
+          "price": 6000,
+          "description": "Grilled sandwich with cheese corn filling."
+        },
+        {
+          "id": "veg-cheese-sandwich",
+          "name": "Veg Cheese Sandwich",
+          "icon": "sandwich",
+          "price": 7000,
+          "description": "Grilled sandwich with veg cheese filling."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+# The Cloudflare Tunnel for ibow, as a user unit. It uses its own config file, ~/.cloudflared/ibow.yml, and touches no other
+# tunnel's. install.sh points ExecStart at the cloudflared it finds on the PATH.
+[Unit]
+Description=Cloudflare Tunnel for ibow
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate --config %h/.cloudflared/ibow.yml tunnel run
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

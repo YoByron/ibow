@@ -1,0 +1,28 @@
+/* The showcase page (/showcase): a static page styled only through the install's theme tokens (/theme.css). */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg)}
+body{font-family:var(--font);color:var(--ink);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:var(--primary-text)}
+:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+.wrap{max-width:960px;margin:0 auto;padding:0 var(--sp-4)}
+.hero{position:relative;background:linear-gradient(135deg,var(--hdr-a),var(--hdr-b));color:var(--on-hdr);padding:56px 0 var(--sp-5)}
+.hero .awning{position:absolute;left:0;right:0;top:0;height:18px;background:repeating-linear-gradient(90deg,var(--awn-a) 0 26px,var(--awn-b) 26px 52px)}
+.eyebrow{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;opacity:.85}
+h1{font-size:clamp(40px,9vw,64px);font-weight:800;letter-spacing:-.03em;line-height:1.05;margin:var(--sp-2) 0}
+.lead{max-width:640px;font-size:18px}
+.actions{display:flex;flex-wrap:wrap;gap:var(--sp-3);margin-top:var(--sp-4)}
+.btn{display:inline-block;min-height:44px;padding:10px 20px;border-radius:var(--r-pill);border:2px solid currentColor;color:inherit;font-weight:700;text-decoration:none}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+main section{padding:var(--sp-5) 0 0}
+h2{font-size:26px;font-weight:800;letter-spacing:-.01em;margin-bottom:var(--sp-2)}
+section>p{max-width:680px;color:var(--ink-2)}
+.shots{display:grid;grid-template-columns:repeat(2,1fr);gap:var(--sp-3);margin-top:var(--sp-4)}
+@media (min-width:720px){.shots{grid-template-columns:repeat(4,1fr)}.shots.two{grid-template-columns:repeat(2,minmax(0,280px));justify-content:center}}
+figure{margin:0}
+figure img{display:block;width:100%;height:auto;border-radius:var(--r-card);border:1px solid var(--line);box-shadow:var(--sh-2);background:var(--card)}
+figcaption{margin-top:var(--sp-2);font-size:13px;color:var(--ink-3);text-align:center}
+figure.wide{margin:var(--sp-4) auto 0;max-width:720px}
+figure.wide:has(img[src$=".gif"]){max-width:300px}
+.card{margin:var(--sp-5) 0 0;padding:var(--sp-4);background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);box-shadow:var(--sh-1)}
+.foot{padding-top:var(--sp-5);padding-bottom:calc(var(--sp-5) + env(safe-area-inset-bottom));font-size:14px;color:var(--ink-3)}
+.foot p+p{margin-top:var(--sp-2)}

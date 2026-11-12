@@ -1,0 +1,43 @@
+{
+  "name": "ibow",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ibow, Intelligent Business Orchestration and Workflows: free, open-source, AI-enabled business orchestration",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node scripts/build-client.ts",
+    "prestart": "npm run build",
+    "start": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server/main.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "vitest run --dir tests",
+    "e2e": "playwright test -c e2e",
+    "gate": "npm run typecheck && npm run lint && npm run test",
+    "check": "npm run gate && npm run e2e",
+    "demo": "node --disable-warning=ExperimentalWarning scripts/demo.ts",
+    "demo:serve": "node --disable-warning=ExperimentalWarning scripts/demo-serve.ts",
+    "backup": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/backup.ts",
+    "screenshots": "node --disable-warning=ExperimentalWarning scripts/screenshots.ts",
+    "hash-pin": "node scripts/hash-pin.ts",
+    "set-links": "node scripts/set-links.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.6",
+    "@playwright/test": "1.61.1",
+    "@types/node": "24.19.2",
+    "esbuild": "0.28.2",
+    "miniflare": "4.20260730.0",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0",
+    "wrangler": "4.160.0"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.6",
+    "hono": "4.13.17",
+    "uqr": "0.1.3"
+  }
+}

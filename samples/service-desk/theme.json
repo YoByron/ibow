@@ -1,0 +1,30 @@
+{
+  "colors": {
+    "primary": "#1d5fd1",
+    "accent": "#ffb020",
+    "header": "#0b2a5b",
+    "light": {
+      "surface": "#eef2f8",
+      "text": "#0f1b33"
+    },
+    "dark": {
+      "surface": "#0c1426",
+      "text": "#e8eefc"
+    }
+  },
+  "font": "system",
+  "radius": "sharp",
+  "density": "compact",
+  "header": {
+    "style": "plain"
+  },
+  "logo": "logo.svg",
+  "features": {
+    "favourites": false,
+    "recent": false,
+    "tags": "off",
+    "veg": false,
+    "darkToggle": true,
+    "cartEta": false
+  }
+}

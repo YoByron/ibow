@@ -1,0 +1,111 @@
+{
+  "categories": [
+    {
+      "id": "breads",
+      "name": "Breads",
+      "icon": "croissant",
+      "items": [
+        {
+          "id": "sourdough-loaf",
+          "name": "Sourdough Loaf",
+          "price": 22000,
+          "diet": "veg"
+        },
+        {
+          "id": "multigrain-loaf",
+          "name": "Multigrain Loaf",
+          "price": 16000,
+          "diet": "veg"
+        },
+        {
+          "id": "milk-bread",
+          "name": "Milk Bread",
+          "price": 6000,
+          "diet": "veg"
+        },
+        {
+          "id": "garlic-baguette",
+          "name": "Garlic Baguette",
+          "price": 12000,
+          "diet": "veg"
+        }
+      ]
+    },
+    {
+      "id": "cakes",
+      "name": "Cakes",
+      "icon": "party_popper",
+      "items": [
+        {
+          "id": "chocolate-slice",
+          "name": "Chocolate Slice",
+          "icon": "hot_beverage",
+          "price": 11000,
+          "diet": "egg"
+        },
+        {
+          "id": "carrot-cake-slice",
+          "name": "Carrot Cake Slice",
+          "price": 10000,
+          "diet": "egg"
+        },
+        {
+          "id": "plum-cake",
+          "name": "Plum Cake",
+          "price": 35000,
+          "diet": "egg"
+        }
+      ]
+    },
+    {
+      "id": "cookies",
+      "name": "Cookies",
+      "icon": "honey_pot",
+      "items": [
+        {
+          "id": "oat-cookies-box",
+          "name": "Oat Cookies Box",
+          "price": 18000,
+          "diet": "egg"
+        },
+        {
+          "id": "butter-cookies-box",
+          "name": "Butter Cookies Box",
+          "price": 20000,
+          "diet": "egg"
+        },
+        {
+          "id": "nankhatai-box",
+          "name": "Nankhatai Box",
+          "price": 15000,
+          "diet": "egg"
+        }
+      ]
+    },
+    {
+      "id": "savouries",
+      "name": "Savouries",
+      "icon": "cheese_wedge",
+      "items": [
+        {
+          "id": "veg-puff",
+          "name": "Veg Puff",
+          "price": 3000,
+          "diet": "veg"
+        },
+        {
+          "id": "paneer-puff",
+          "name": "Paneer Puff",
+          "price": 4000,
+          "diet": "veg"
+        },
+        {
+          "id": "cheese-straws",
+          "name": "Cheese Straws",
+          "price": 9000,
+          "diet": "veg"
+        }
+      ]
+    }
+  ]
+}

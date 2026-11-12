@@ -1,0 +1,46 @@
+# ibow on Cloudflare Workers' free plan (docs/install.md, D-030). One Worker serves the built client as static assets and
+# sends /api/* to one Durable Object, which holds the business in its SQLite storage.
+#
+#   npx wrangler deploy              your business: config/ holds business.json, catalog.json, stations.json
+#   npx wrangler deploy -c wrangler.demo.toml   the public demo: the tea-house sample, throwaway PINs on the sign-in screens
+#
+# Secrets are never written here: `npx wrangler secret put OWNER_PIN_HASH` (and UPI_VPA, AI_API_KEY if you use them).
+
+name = "ibow"
+main = "src/worker/index.ts"
+# The newest date the pinned workerd supports. nodejs_compat provides node:crypto (randomBytes, hashing) and node:events; PINs use WebCrypto PBKDF2.
+compatibility_date = "2026-08-06"
+compatibility_flags = ["nodejs_compat"]
+
+[build]
+# Before every deploy and `wrangler dev`: bundles the look of config/ (theme.json, strings, images) as dist/look.json, which
+# the Worker has no files to read instead (D-052), then builds dist/client, the static assets, with the image hosts it names.
+command = "node scripts/bundle-look.ts config dist/look.json && npm run build -- --look dist/look.json"
+
+[alias]
+# The business, bundled at deploy time (an alias maps one module name to one file). ibow-rush is the demo's seed data; a real install has none.
+ibow-business = "./config/business.json"
+ibow-catalog = "./config/catalog.json"
+ibow-stations = "./config/stations.json"
+ibow-look = "./dist/look.json"
+ibow-rush = "./src/worker/no-rush.json"
+ibow-demo-bundle = "./src/worker/no-demo-bundle.json"
+
+[assets]
+directory = "./dist/client"
+binding = "ASSETS"
+# Static files are free and never run the Worker. These run it: the API, and the pages that depend on configuration.
+# tests/support/worker.ts lists the same paths; a test keeps the two equal.
+run_worker_first = ["/api/*", "/theme.css", "/media/*", "/manifest.webmanifest", "/owner", "/owner-ai.js", "/showcase*"]
+
+[[durable_objects.bindings]]
+name = "INSTALL"
+class_name = "Install"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Install"]
+
+# Plain settings go in [vars]; leave them out to keep the defaults. UPI_PAYEE_NAME and AI_BASE_URL/AI_MODEL are not secret.
+# [vars]
+# UPI_PAYEE_NAME = "My Shop"

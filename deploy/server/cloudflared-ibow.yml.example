@@ -1,0 +1,9 @@
+# Copy to ~/.cloudflared/ibow.yml and edit the three lines that name your own tunnel, user and host. `cloudflared tunnel create ibow` prints the tunnel id and
+# writes the credentials file; the path must be absolute (no ~).
+tunnel: ibow
+credentials-file: ABSOLUTE-PATH-OF-YOUR-HOME-DIRECTORY/.cloudflared/TUNNEL-ID.json
+
+ingress:
+  - hostname: ibow.example.com
+    service: http://127.0.0.1:8790
+  - service: http_status:404

@@ -1,0 +1,39 @@
+# The public demo on Workers (docs/install.md): the tea-house sample with three days of seeded orders (about 200), and throwaway PINs
+# shown on the staff, counter and owner sign-in screens so a visitor can try every role.
+#
+#   npx wrangler deploy -c wrangler.demo.toml
+#
+# It is a separate file because wrangler does not apply an environment's own alias. It names a different Worker and so a
+# different Durable Object, and DEMO=1 refuses any database that holds a real install's data (D-035).
+
+name = "ibow-demo"
+main = "src/worker/index.ts"
+compatibility_date = "2026-08-06"
+compatibility_flags = ["nodejs_compat"]
+
+[build]
+command = "node scripts/bundle-look.ts samples/tea-house dist/look-demo.json && npm run build -- --look dist/look-demo.json"
+
+[alias]
+ibow-business = "./samples/tea-house/business.json"
+ibow-catalog = "./samples/tea-house/catalog.json"
+ibow-stations = "./samples/tea-house/stations.json"
+ibow-look = "./dist/look-demo.json"
+ibow-rush = "./samples/tea-house/rush.json"
+ibow-demo-bundle = "./src/worker/demo-bundle.json"
+
+[assets]
+directory = "./dist/client"
+binding = "ASSETS"
+run_worker_first = ["/", "/api/*", "/theme.css", "/media/*", "/manifest.webmanifest", "/owner", "/owner-ai.js", "/showcase*"]
+
+[vars]
+DEMO = "1"
+
+[[durable_objects.bindings]]
+name = "INSTALL"
+class_name = "Install"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Install"]

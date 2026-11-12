@@ -1,0 +1,2 @@
+# The one secret ibow needs. Make the value with `npm run hash-pin`; set it with `npx wrangler secret put OWNER_PIN_HASH`.
+OWNER_PIN_HASH=

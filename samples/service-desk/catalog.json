@@ -1,0 +1,76 @@
+{
+  "categories": [
+    {
+      "id": "quick-services",
+      "name": "Quick Services",
+      "icon": "stopwatch",
+      "items": [
+        {
+          "id": "screen-guard-fitting",
+          "name": "Screen Guard Fitting",
+          "price": 4000
+        },
+        {
+          "id": "phone-cleaning",
+          "name": "Phone Cleaning",
+          "price": 2500
+        },
+        {
+          "id": "data-transfer",
+          "name": "Data Transfer",
+          "price": 7500
+        },
+        {
+          "id": "document-printing",
+          "name": "Document Printing",
+          "price": 150
+        }
+      ]
+    },
+    {
+      "id": "repairs",
+      "name": "Repairs",
+      "icon": "clipboard",
+      "items": [
+        {
+          "id": "screen-replacement",
+          "name": "Screen Replacement",
+          "variants": [
+            {
+              "size": "Standard",
+              "price": 45000
+            },
+            {
+              "size": "Express",
+              "price": 55000
+            }
+          ]
+        },
+        {
+          "id": "battery-replacement",
+          "name": "Battery Replacement",
+          "variants": [
+            {
+              "size": "Standard",
+              "price": 25000
+            },
+            {
+              "size": "Express",
+              "price": 32000
+            }
+          ]
+        },
+        {
+          "id": "charging-port-repair",
+          "name": "Charging Port Repair",
+          "price": 15000
+        },
+        {
+          "id": "water-damage-check",
+          "name": "Water Damage Check",
+          "price": 9000
+        }
+      ]
+    }
+  ]
+}

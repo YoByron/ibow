@@ -1,0 +1,126 @@
+{
+  "categories": [
+    {
+      "id": "coffee",
+      "name": "Coffee",
+      "icon": "hot_beverage",
+      "items": [
+        {
+          "id": "espresso",
+          "name": "Espresso",
+          "icon": "hot_beverage",
+          "variants": [
+            {
+              "size": "S",
+              "price": 300
+            },
+            {
+              "size": "M",
+              "price": 375
+            }
+          ],
+          "description": "A short, strong shot pulled to order."
+        },
+        {
+          "id": "americano",
+          "name": "Americano",
+          "icon": "teacup_without_handle",
+          "variants": [
+            {
+              "size": "S",
+              "price": 325
+            },
+            {
+              "size": "M",
+              "price": 375
+            },
+            {
+              "size": "L",
+              "price": 425
+            }
+          ],
+          "description": "Espresso lengthened with hot water."
+        },
+        {
+          "id": "cappuccino",
+          "name": "Cappuccino",
+          "icon": "hot_beverage",
+          "variants": [
+            {
+              "size": "S",
+              "price": 400
+            },
+            {
+              "size": "M",
+              "price": 450
+            },
+            {
+              "size": "L",
+              "price": 500
+            }
+          ],
+          "description": "Equal parts espresso, steamed milk and foam."
+        },
+        {
+          "id": "latte",
+          "name": "Latte",
+          "icon": "hot_beverage",
+          "variants": [
+            {
+              "size": "S",
+              "price": 425
+            },
+            {
+              "size": "M",
+              "price": 475
+            },
+            {
+              "size": "L",
+              "price": 525
+            }
+          ],
+          "description": "Espresso under steamed milk with a thin foam."
+        }
+      ]
+    },
+    {
+      "id": "other-drinks",
+      "name": "Other Drinks",
+      "icon": "cup_with_straw",
+      "items": [
+        {
+          "id": "hot-chocolate",
+          "name": "Hot Chocolate",
+          "icon": "hot_beverage",
+          "variants": [
+            {
+              "size": "S",
+              "price": 350
+            },
+            {
+              "size": "M",
+              "price": 400
+            }
+          ],
+          "description": "Dark chocolate melted into steamed milk."
+        },
+        {
+          "id": "iced-tea",
+          "name": "Iced Tea",
+          "icon": "ice",
+          "variants": [
+            {
+              "size": "M",
+              "price": 300
+            },
+            {
+              "size": "L",
+              "price": 350
+            }
+          ],
+          "description": "Black tea brewed strong and served over ice."
+        }
+      ]
+    }
+  ]
+}

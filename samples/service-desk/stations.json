@@ -1,0 +1,11 @@
+[
+  { "id": "front-desk", "name": "Front Desk", "categories": ["quick-services"], "speak": true, "print": null },
+  {
+    "id": "workshop",
+    "name": "Workshop",
+    "categories": ["repairs"],
+    "view": "jobs",
+    "speak": true,
+    "print": "ticket-80mm"
+  }
+]

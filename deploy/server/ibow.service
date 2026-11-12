@@ -1,0 +1,33 @@
+# ibow, the demo on Node: a systemd USER unit (no root). Installed by deploy/server/install.sh into ~/.config/systemd/user/.
+# It runs the pinned Node from ~/apps/ibow/node on the release that ~/apps/ibow/current points at.
+[Unit]
+Description=ibow demo (Node)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/apps/ibow/current
+EnvironmentFile=%h/apps/ibow/ibow.env
+# HOST, PORT, TRUST_PROXY and IBOW_DEMO_SAMPLE come from ibow.env; the data directory is fixed here.
+ExecStart=%h/apps/ibow/node/bin/node --disable-warning=ExperimentalWarning scripts/demo-serve.ts --data %h/apps/ibow/data
+Restart=on-failure
+RestartSec=3
+# SIGTERM is handled: the server stops and the process exits 0.
+TimeoutStopSec=20
+# Resource limits (cgroups; the user manager must have the memory and cpu controllers delegated, which is the default on
+# current Ubuntu; if not, systemd logs a warning and the limits are not applied).
+MemoryMax=300M
+CPUQuota=50%
+# Hardening that works without root. Sandboxing options that need a mount namespace (ProtectSystem, PrivateTmp) are left
+# out on purpose: an unprivileged user manager often cannot set them up, and the unit would then fail to start.
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+
+[Install]
+WantedBy=default.target

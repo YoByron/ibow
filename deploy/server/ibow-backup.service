@@ -1,0 +1,9 @@
+# A consistent copy of the database (VACUUM INTO, through npm run backup's script), safe while ibow serves.
+[Unit]
+Description=ibow database backup
+
+[Service]
+Type=oneshot
+ExecStart=%h/apps/ibow/bin/backup.sh
+NoNewPrivileges=true
+UMask=0077

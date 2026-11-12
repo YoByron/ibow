@@ -1,0 +1,12 @@
+{
+  "name": "The Tea House",
+  "currency": "INR",
+  "timeZone": "Asia/Kolkata",
+  "cashShortcuts": [5, 10, 20, 30, 40, 50],
+  "phone": "+91 00000 00000",
+  "address": "Example Street, Example City",
+  "hours": {
+    "open": "07:00",
+    "close": "22:00"
+  }
+}

@@ -1,0 +1,30 @@
+[
+  {
+    "id": "tea",
+    "name": "Tea / Coffee",
+    "categories": ["tea-coffee"],
+    "speak": true,
+    "print": null
+  },
+  {
+    "id": "kitchen",
+    "name": "Kitchen",
+    "categories": [
+      "ice-tea",
+      "soda",
+      "mocktails",
+      "instant-noodles",
+      "sweet-corn",
+      "snacks",
+      "fries",
+      "noodles",
+      "chinese",
+      "momos",
+      "pasta",
+      "burger",
+      "sandwich"
+    ],
+    "speak": true,
+    "print": "ticket-80mm"
+  }
+]
