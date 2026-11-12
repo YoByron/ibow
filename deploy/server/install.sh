@@ -53,6 +53,7 @@ fi
 install -m 0755 "$here/update.sh" "$APP/bin/update.sh"
 install -m 0755 "$here/backup.sh" "$APP/bin/backup.sh"
 install -m 0644 "$here/ci-status.ts" "$APP/bin/ci-status.ts"
+install -m 0644 "$here/lib-smoke.sh" "$APP/bin/lib-smoke.sh"
 if [ ! -e "$APP/ibow.env" ]; then
   install -m 0600 "$here/ibow.env.example" "$APP/ibow.env"
   say "wrote $APP/ibow.env: check IBOW_REPO in it"

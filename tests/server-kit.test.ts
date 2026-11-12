@@ -61,6 +61,52 @@ describe("the shell scripts", () => {
   });
 });
 
+describe("the smoke server never outlives the updater", () => {
+  const update = read("update.sh");
+  const lib = read("lib-smoke.sh");
+
+  test("lib-smoke.sh parses, and update.sh uses it instead of a wrapping subshell and a bare kill", () => {
+    if (bash) expect(spawnSync("bash", ["-n", join(dir, "lib-smoke.sh")]).status).toBe(0);
+    expect(update).toContain("lib-smoke.sh");
+    expect(update).toContain("smoke_start");
+    expect(update).toContain("smoke_stop");
+    expect(update).not.toMatch(/\(cd "\$rel" &&/);
+    expect(update).not.toMatch(/kill "\$smoke"/);
+    expect(read("install.sh")).toContain("lib-smoke.sh");
+  });
+
+  test("the smoke server runs in its own group without the lock, and is stopped as a group; every long child closes the lock", () => {
+    expect(lib).toContain("setsid");
+    expect(lib).toContain("9>&-");
+    expect(lib).toMatch(/kill -TERM -- "-\$pid"/);
+    expect(lib).toMatch(/kill -KILL -- "-\$pid"/);
+    expect(lib).toContain("wait");
+    for (const call of ["npm ci", "npm run build", 'git -C "$work" fetch', "backup.sh", "systemctl --user restart"]) {
+      const line = update.split("\n").find((l) => l.includes(call) && !l.trimStart().startsWith("#"));
+      expect(line, call).toBeDefined();
+      expect(line, call).toContain("9>&-");
+    }
+  });
+
+  test("a busy lock names its holder, from a pid file written after the lock is taken", () => {
+    expect(update).toMatch(/lock_holder "\$APP\/state\/update\.pid"/);
+    expect(update).toMatch(/echo "\$\$" >"\$APP\/state\/update\.pid"/);
+    expect(update).toContain('exec 9>>"$APP/state/update.lock"');
+  });
+
+  const linux =
+    bash && spawnSync("bash", ["-c", "command -v flock && command -v setsid && test -d /proc/self"]).status === 0;
+  test.skipIf(!linux)(
+    "behaviour: a stub server with a child is stopped as a group and leaves nothing holding the lock",
+    () => {
+      const res = spawnSync("bash", [join(dir, "../../tests/support/smoke-check.sh")], { encoding: "utf8" });
+      expect(res.stderr).toBe("");
+      expect(res.stdout).toContain("smoke-check: OK");
+      expect(res.status).toBe(0);
+    },
+  );
+});
+
 describe("the units", () => {
   test("ibow.service runs the pinned Node from current, with limits and hardening, as a user unit", () => {
     const text = read("ibow.service");
@@ -102,7 +148,7 @@ describe("the units", () => {
   test("every file the install script copies exists", () => {
     const text = read("install.sh");
     for (const m of text.matchAll(
-      /\b((?:ibow|cloudflared-ibow)[\w.-]*\.(?:service|timer|example)|update\.sh|backup\.sh|ci-status\.ts)\b/g,
+      /\b((?:ibow|cloudflared-ibow)[\w.-]*\.(?:service|timer|example)|update\.sh|backup\.sh|lib-smoke\.sh|ci-status\.ts)\b/g,
     )) {
       expect(existsSync(join(dir, m[1] as string)), m[1]).toBe(true);
     }

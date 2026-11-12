@@ -35,13 +35,19 @@ slug="${REPO#https://github.com/}"
 slug="${slug%.git}"
 slug="${slug%/}"
 
-exec 9>"$APP/state/update.lock"
+# shellcheck disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/lib-smoke.sh"
+
+# The lock is file descriptor 9. Nothing this script starts may inherit it (every child below gets 9>&-), or a child that
+# outlives the script would keep the lock and block every later update.
+exec 9>>"$APP/state/update.lock"
 flock -n 9 || {
-  log "another update is running; skipping this one"
+  log "another update is running; skipping this one: $(lock_holder "$APP/state/update.pid")"
   exit 0
 }
+echo "$$" >"$APP/state/update.pid"
 
-sha="$(git ls-remote "$REPO" "refs/heads/$BRANCH" | cut -f1)"
+sha="$(git ls-remote "$REPO" "refs/heads/$BRANCH" 9>&- | cut -f1)"
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "expected a 40-character commit for $BRANCH of $REPO, found '$sha'"
 cur=""
 [ -L "$APP/current" ] && cur="$(basename "$(readlink -f "$APP/current")")"
@@ -57,13 +63,9 @@ fi
 # CI gate: the public API, unauthenticated (60 requests an hour per address: at one look every 5 minutes this is plenty).
 hdr="$(mktemp)"
 body="$(mktemp)"
-smoke=""
 cleanup() {
-  rm -f "$hdr" "$body"
-  if [ -n "$smoke" ]; then
-    kill "$smoke" 2>/dev/null || true
-    wait "$smoke" 2>/dev/null || true
-  fi
+  rm -f "$hdr" "$body" "$APP/state/update.pid"
+  smoke_stop
   rm -rf "${tmpdata:-}"
 }
 trap cleanup EXIT
@@ -108,10 +110,10 @@ if [ ! -d "$rel" ]; then
   mkdir -p "$work"
   git -C "$work" init -q
   git -C "$work" remote add origin "$REPO"
-  git -C "$work" fetch -q --depth 1 origin "$sha"
+  git -C "$work" fetch -q --depth 1 origin "$sha" 9>&-
   git -C "$work" checkout -q FETCH_HEAD
   log "building ${sha:0:12} with Node $("$NODE/node" --version)"
-  if ! (cd "$work" && npm ci --no-audit --no-fund --loglevel=error && npm run build >/dev/null); then
+  if ! (cd "$work" && npm ci --no-audit --no-fund --loglevel=error 9>&- && npm run build >/dev/null 9>&-); then
     rm -rf "$work"
     fail_release "npm ci or the build failed for ${sha:0:12}"
   fi
@@ -121,16 +123,16 @@ fi
 # Smoke test on a spare port with a throwaway data directory, so it can never touch the live database.
 spare="$("$NODE/node" -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
 tmpdata="$(mktemp -d "$APP/state/smoke.XXXXXX")"
-(cd "$rel" && HOST=127.0.0.1 PORT="$spare" TRUST_PROXY=0 IBOW_DEMO_SAMPLE="${IBOW_DEMO_SAMPLE:-tea-house}" \
-  "$NODE/node" --disable-warning=ExperimentalWarning scripts/demo-serve.ts --data "$tmpdata" >"$tmpdata/log" 2>&1) &
-smoke=$!
+# No wrapping subshell: smoke_start runs node itself, in its own process group and without the lock (lib-smoke.sh).
+smoke_start "$tmpdata/log" env HOST=127.0.0.1 PORT="$spare" TRUST_PROXY=0 IBOW_DEMO_SAMPLE="${IBOW_DEMO_SAMPLE:-tea-house}" \
+  "$NODE/node" --disable-warning=ExperimentalWarning "$rel/scripts/demo-serve.ts" --data "$tmpdata"
 ok=0
 for _ in $(seq 1 90); do
   if curl -fsS -m 3 -o /dev/null "http://127.0.0.1:$spare/healthz" 2>/dev/null; then
     ok=1
     break
   fi
-  kill -0 "$smoke" 2>/dev/null || break
+  smoke_alive || break
   sleep 1
 done
 if [ "$ok" = 1 ]; then
@@ -138,9 +140,7 @@ if [ "$ok" = 1 ]; then
     [ "$(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$spare$path")" = "200" ] || ok=0
   done
 fi
-kill "$smoke" 2>/dev/null || true
-wait "$smoke" 2>/dev/null || true
-smoke=""
+smoke_stop
 if [ "$ok" != 1 ]; then
   log "smoke test failed for ${sha:0:12}; last lines of its log:"
   tail -n 15 "$tmpdata/log" 2>/dev/null || true
@@ -150,13 +150,13 @@ fi
 log "smoke test passed for ${sha:0:12}"
 
 # A copy of the data first, so a rollback to older code never meets a newer database without a way back.
-"$APP/bin/backup.sh" "pre-${sha:0:12}" || log "warning: the pre-update backup failed; going on"
+"$APP/bin/backup.sh" "pre-${sha:0:12}" 9>&- || log "warning: the pre-update backup failed; going on"
 
 # Switch: a new symlink renamed over the old one is atomic.
 prev="$(readlink "$APP/current" 2>/dev/null || true)"
 ln -sfn "releases/$sha" "$APP/current.new"
 mv -T "$APP/current.new" "$APP/current"
-systemctl --user restart ibow.service
+systemctl --user restart ibow.service 9>&-
 healthy=0
 for _ in $(seq 1 60); do
   if curl -fsS -m 3 -o /dev/null "http://127.0.0.1:$PORT/healthz" 2>/dev/null; then

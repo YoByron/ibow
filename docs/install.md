@@ -472,6 +472,21 @@ curl -s https://ibow.example.com/healthz        # prints: ok
 
 `install.sh` is safe to run again: it keeps your `ibow.env` and changes nothing that is already right.
 
+### Updating the kit
+
+The scripts the timers run (`update.sh`, `backup.sh` and its helpers) are copies in `~/apps/ibow/bin`, kept outside the
+releases on purpose so an update never rewrites the script that is running it. They are refreshed only when you run
+`install.sh` again, from a checkout that is current. After you `git pull` the source clone (or when the kit itself changes):
+
+```sh
+cd ~/ibow-src && git pull
+bash ~/ibow-src/deploy/server/install.sh
+```
+
+`install.sh` is safe to run as often as you like: it keeps your `ibow.env` and the database, skips Node when the pinned version
+is already there, reinstalls the scripts and unit files, reloads systemd and enables the same units. It does not restart a
+running `ibow` and does not interrupt an update in progress.
+
 ### Day to day
 
 | Task | Command |
