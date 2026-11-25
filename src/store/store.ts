@@ -591,9 +591,11 @@ function blank(column: string): string {
  * Parameters: the window's start and end. The lines are rebuilt in order from `json_each`.
  */
 function eventNotesSql(edit: string): string {
-  return `UPDATE events SET data = json_set(data, '$.lines', (
+  // json(...) around the subquery: newer SQLite drops the JSON subtype across a subquery, and json_set would then
+  // store the list as a string (found on CI, SQLite 3.5x).
+  return `UPDATE events SET data = json_set(data, '$.lines', json((
       SELECT json_group_array(json(CASE WHEN json_extract(v.value, '$.note') IS NOT NULL THEN ${edit} ELSE v.value END))
-      FROM (SELECT value, key FROM json_each(events.data, '$.lines') ORDER BY key) v))
+      FROM (SELECT value, key FROM json_each(events.data, '$.lines') ORDER BY key) v)))
     WHERE order_id IN (SELECT id FROM orders WHERE created_at >= ? AND created_at < ?)
       AND data LIKE '%"note":%'`;
 }
