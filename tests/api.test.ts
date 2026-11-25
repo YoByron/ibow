@@ -96,17 +96,18 @@ describe("customer API", () => {
       name: "The Tea House",
       currency: "INR",
       timeZone: "Asia/Kolkata",
+      lateMinutes: 6,
       maxQtyPerLine: 99,
       cashShortcutsMinor: [500, 1000, 2000, 3000, 4000, 5000],
       hours: { open: "07:00", close: "22:00" },
     });
-    expect(r.body.payments).toEqual({ upi: false });
+    expect(r.body.payments).toEqual({ upi: false, card: false });
     expect(r.body.categories).toHaveLength(config.catalog.categories.length);
   });
 
   test("offers UPI only when configured, with an intent for the order's exact amount and token", async () => {
     boot({ payments: { upi: { vpa: "teahouse@example", payeeName: "The Tea House" } } });
-    expect((await call("GET", "/api/catalog")).body.payments).toEqual({ upi: true });
+    expect((await call("GET", "/api/catalog")).body.payments).toEqual({ upi: true, card: false });
     const { body } = await newOrder();
     const id = body.order.id as string;
     expect((await call("GET", `/api/orders/${id}/upi`)).status).toBe(401);
@@ -259,6 +260,8 @@ describe("staff API", () => {
       user: "counter-1",
       role: "staff",
       access: "all",
+      powers: ["orders.view", "orders.run", "hub"],
+      canRefund: false,
     });
     expect((await call("PUT", "/api/staff/x", { cookie: staff, body: { name: "X", pin: "1234" } })).status).toBe(403);
     const owner = await login("owner", OWNER_PIN);
@@ -363,13 +366,13 @@ describe("staff roles", () => {
 });
 
 describe("stations and top-ups", () => {
-  test("staff read each station's name, view, speech and print settings", async () => {
+  test("staff read each station's name, view, speech, print settings and categories (its tile's icon)", async () => {
     boot({ config: loadSample("service-desk") });
     const staff = await staffCookie();
     const r = await call("GET", "/api/stations", { cookie: staff });
     expect(r.body.stations).toEqual([
-      { id: "front-desk", name: "Front Desk", view: "batch", speak: true, print: null },
-      { id: "workshop", name: "Workshop", view: "jobs", speak: true, print: "ticket-80mm" },
+      { id: "front-desk", name: "Front Desk", view: "batch", speak: true, print: null, categories: ["quick-services"] },
+      { id: "workshop", name: "Workshop", view: "jobs", speak: true, print: "ticket-80mm", categories: ["repairs"] },
     ]);
   });
 

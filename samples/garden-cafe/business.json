@@ -1,0 +1,14 @@
+{
+  "name": "Leaf & Lantern Garden Cafe",
+  "currency": "EUR",
+  "timeZone": "Europe/Lisbon",
+  "phone": "+351 000 000 000",
+  "address": "Example Garden Lane, Example Town",
+  "card": true,
+  "managerRefundLimit": 20,
+  "hours": {
+    "open": "09:00",
+    "close": "19:00",
+    "lastOrder": "18:30"
+  }
+}

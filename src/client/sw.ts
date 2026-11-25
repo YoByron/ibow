@@ -72,7 +72,7 @@ scope.addEventListener("fetch", (e) => {
   if (url.pathname === "/theme.css") {
     // The look: the cached sheet at once, refreshed behind it. A request with ?v= (the owner just saved a new look)
     // goes to the network, because the cached sheet is the old one.
-    e.respondWith(themeSheet(url.search !== ""));
+    e.respondWith(themeSheet(url.searchParams.has("v")));
     return;
   }
   if (RUNTIME.some((p) => url.pathname.startsWith(p))) {

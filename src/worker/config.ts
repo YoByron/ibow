@@ -9,12 +9,13 @@ import catalog from "ibow-catalog" with { type: "json" };
 import marker from "ibow-demo-bundle" with { type: "json" };
 import look from "ibow-look" with { type: "json" };
 import rushJson from "ibow-rush" with { type: "json" };
+import spots from "ibow-spots" with { type: "json" };
 import stations from "ibow-stations" with { type: "json" };
 import { loadConfig } from "../core/config.ts";
 import type { DemoRush } from "../demo/seed.ts";
 import { type LookBundle, lookFromBundle } from "../server/theme.ts";
 
-export const config = loadConfig({ business, catalog, stations });
+export const config = loadConfig({ business, catalog, stations, spots });
 /** The theme, strings and images of the config folder, bundled at deploy time by scripts/bundle-look.ts (D-052). */
 export const looks = lookFromBundle(look as unknown as LookBundle);
 export const rush = rushJson as unknown as DemoRush;

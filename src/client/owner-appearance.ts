@@ -244,7 +244,7 @@ export async function appearanceView(
       set(box.checked);
       changed();
     });
-    return h("label", { class: "check" }, box, h("span", {}, label));
+    return h("label", { class: "flag-check" }, box, h("span", {}, label));
   };
 
   const c = () => draft.colors;

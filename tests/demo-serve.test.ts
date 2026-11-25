@@ -98,11 +98,11 @@ describe("serveDemo", () => {
     expect((await demoInfo(again.base)).demo).toBe(true);
   });
 
-  test("the PINs file is plain JSON with the three throwaway PINs", async () => {
+  test("the PINs file is plain JSON with the five throwaway PINs", async () => {
     const dir = tempDir();
     const s = await start(dir);
     const saved = JSON.parse(readFileSync(join(dir, "demo-pins.json"), "utf8")) as { pins: Record<string, string> };
-    expect(Object.keys(saved.pins).sort()).toEqual(["counter", "owner", "station"]);
+    expect(Object.keys(saved.pins).sort()).toEqual(["admin", "counter", "manager", "owner", "station"]);
     writeFileSync(join(dir, "note"), "x");
     await s.stop();
   });

@@ -11,8 +11,6 @@ import type { DurableObjectStorage } from "cloudflare:workers";
 import type { Row, SqlDriver, SqlValue, Statement } from "../store/driver.ts";
 
 export interface DoDriver extends SqlDriver {
-  /** Rows written since this driver was made, indexes included: what the free plan's daily row limit counts. */
-  rowsWritten(): number;
   rowsRead(): number;
 }
 
@@ -53,6 +51,8 @@ export function doDriver(storage: DurableObjectStorage): DoDriver {
     isDemo: () => kv.get(DEMO_KEY) === true,
     afterForget() {},
     close() {},
+    size: () => sql.databaseSize,
+    /** Rows written since this driver was made, indexes included: what the free plan's daily row limit counts. */
     rowsWritten: () => written,
     rowsRead: () => read,
   };

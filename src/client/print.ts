@@ -11,6 +11,9 @@ export interface TicketLine {
   name: string;
   size?: string;
   qty: number;
+  /** Names of the extras, in catalog order. */
+  extras?: readonly string[];
+  note?: string;
   /** Receipts only. */
   unitMinor?: number;
 }
@@ -25,6 +28,8 @@ export interface Ticket {
   /** Station tickets: which station it is for. */
   station?: string;
   customerName?: string;
+  /** Where the customer sits, when they said. */
+  spot?: string;
   lines: readonly TicketLine[];
   /** Receipts: the order's money, in minor units of `currency`. */
   money?: { currency: string; totalMinor: number; paidMinor: number; dueMinor: number };
@@ -42,7 +47,13 @@ export function ticketNode(ticket: Ticket, locale: string): HTMLElement {
       "li",
       {},
       h("span", { class: "t-qty" }, `${l.qty} ×`),
-      h("span", { class: "t-name" }, l.size === undefined ? l.name : `${l.name} (${l.size})`),
+      h(
+        "span",
+        { class: "t-name" },
+        l.size === undefined ? l.name : `${l.name} (${l.size})`,
+        l.extras !== undefined && l.extras.length > 0 && h("span", { class: "t-extras" }, ` + ${l.extras.join(" + ")}`),
+        l.note !== undefined && h("span", { class: "t-note" }, ` "${l.note}"`),
+      ),
       l.unitMinor !== undefined && h("span", { class: "t-amount" }, fmt(l.unitMinor * l.qty)),
     ),
   );
@@ -55,6 +66,7 @@ export function ticketNode(ticket: Ticket, locale: string): HTMLElement {
     h("p", { class: "t-token" }, t("ticketToken", { token: ticket.token })),
     h("p", { class: "t-time" }, when(ticket.at, ticket.timeZone, locale)),
     ticket.customerName !== undefined && h("p", { class: "t-note" }, t("forName", { name: ticket.customerName })),
+    ticket.spot !== undefined && h("p", { class: "t-note" }, t("spotAt", { spot: ticket.spot })),
     h("ul", { class: "t-lines" }, ...rows),
     m &&
       h(

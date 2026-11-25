@@ -48,6 +48,7 @@ const PAGES: Readonly<Record<string, string>> = {
   "/": "/index.html",
   "/staff": "/staff.html",
   "/owner": "/owner.html",
+  "/admin": "/admin.html",
   "/showcase": "/showcase.html",
 };
 const COMPRESS = new Set([".html", ".js", ".css", ".webmanifest", ".svg"]);
@@ -124,6 +125,9 @@ function withAnalyst(page: ClientFile): ClientFile {
   return file;
 }
 
+const isShowcase = (path: string): boolean =>
+  path === "/showcase.html" || path === "/showcase.css" || path.startsWith("/showcase/");
+
 export function registerClient<E extends Env>(
   http: Hono<E>,
   client: ClientFiles,
@@ -133,8 +137,8 @@ export function registerClient<E extends Env>(
     imageOrigins?: readonly string[];
     /** The header colour of the look in force, read per request so the owner's Appearance reaches the meta tag and the manifest. */
     themeColor?: () => string;
-    /** Whether `/showcase` and its files are served (a demo, or `showcase: true` in business.json); otherwise they are 404 (D-055). */
-    showcase?: boolean;
+    /** Whether `/showcase` and its files are served now (a demo, `showcase: true` in business.json, or the admin's switch); otherwise 404 (D-055, D-075). */
+    showcase?: () => boolean;
   },
 ): void {
   const all = new Map(client.files);
@@ -159,11 +163,6 @@ export function registerClient<E extends Env>(
     return out;
   };
   all.set("/manifest.webmanifest", asFile(Buffer.from(manifest(opts.name)), TYPES[".webmanifest"] as string));
-  if (!opts.showcase) {
-    for (const path of [...all.keys()]) {
-      if (path === "/showcase.html" || path === "/showcase.css" || path.startsWith("/showcase/")) all.delete(path);
-    }
-  }
   const owner = all.get("/owner.html");
   if (opts.ai) {
     if (owner === undefined || !all.has(ANALYST_SCRIPT)) {
@@ -175,6 +174,7 @@ export function registerClient<E extends Env>(
     const path = PAGES[c.req.path] ?? c.req.path;
     const base = all.get(path);
     if (base === undefined || path.startsWith("/api/")) return next();
+    if (isShowcase(path) && !(opts.showcase?.() ?? false)) return next();
     const file = base.type.startsWith("text/html") || path === "/manifest.webmanifest" ? themed(path, base) : base;
     const headers: Record<string, string> = {
       "content-type": file.type,

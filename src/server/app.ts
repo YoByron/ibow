@@ -11,8 +11,11 @@ import { bodyLimit } from "hono/body-limit";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { analystContext, ask, MAX_QUESTION_CHARS } from "../ai/analyst.ts";
 import { AiError, type ChatModel } from "../ai/model.ts";
-import { type Config, withAvailability } from "../core/config.ts";
+import { type Config, isRoom, withAvailability } from "../core/config.ts";
+import { FlagError } from "../core/flags.ts";
+import { businessWeekday, closedDayAt, nextOpenDay, takesOrdersAt } from "../core/hours.ts";
 import { localTime } from "../core/insights.ts";
+import { can, type Level, mayRefund, POWERS, type Power, refundCeiling, TABLE } from "../core/levels.ts";
 import {
   addLines,
   advanceStatus,
@@ -25,26 +28,40 @@ import {
   OrderError,
   type OrderErrorCode,
   orderTotal,
+  outstandingMinor,
   topUp,
   undoStatus,
   unmarkReady,
 } from "../core/orders.ts";
-import { claimPayment, confirmPayment, PaymentError, upiIntent } from "../core/payments.ts";
+import {
+  claimPayment,
+  confirmPayment,
+  PaymentError,
+  type PaymentMethod,
+  refundPayment,
+  upiIntent,
+} from "../core/payments.ts";
 import { earlierVisits } from "../core/regulars.ts";
 import { MAX_REVIEW_TEXT, reviewOrder } from "../core/reviews.ts";
+import { assertNotOnRoomBill, openRoomOrders } from "../core/rooms.ts";
 import { ordersAhead } from "../core/storefront.ts";
 import { DEFAULT_THEME } from "../core/theme.ts";
-import { dayKey } from "../core/tokens.ts";
+import { dayKey, tokenForNumber } from "../core/tokens.ts";
 import { customerView, staffView, stationView } from "../core/views.ts";
-import type { EventType, Role, Session, StaffRole, Store } from "../store/store.ts";
+import type { EventType, Session, Store } from "../store/store.ts";
+import { registerAdmin, systemFlags } from "./admin.ts";
 import { DUMMY_HASH, hashPin, hashSessionId, isPin, needsRehash, newSessionId, sameSecret, verifyPin } from "./auth.ts";
+import { registerCalendar } from "./calendar.ts";
 import { ApiError, type Env } from "./errors.ts";
 import * as input from "./input.ts";
 import { InputError } from "./input.ts";
 import { type Backoff, createLimiter, createLockout, type Limit } from "./limits.ts";
 import { createReportBuilder } from "./report.ts";
+import { roomKeys } from "./room-keys.ts";
+import { registerRooms } from "./rooms.ts";
 import { type ClientFiles, registerClient } from "./static.ts";
 import { registerStreams } from "./streams.ts";
+import { createTelemetry } from "./telemetry.ts";
 import { type Look, registerTheme } from "./theme.ts";
 
 export interface AppDeps {
@@ -52,6 +69,13 @@ export interface AppDeps {
   store: Store;
   /** From `OWNER_PIN_HASH`; see scripts/hash-pin.ts. */
   ownerPinHash: string;
+  /**
+   * `RENAME_ADMIN_STAFF`: a new id for a staff member saved as `admin` before D-072, applied once at start; without it such
+   * a record stops the boot.
+   */
+  renameAdminStaff?: string;
+  /** From `ADMIN_PIN_HASH`, the system admin's own PIN (D-072); without it nobody can sign in as admin. */
+  adminPinHash?: string;
   now?: () => number;
   /** The caller's address, for rate limits. Defaults to the socket's remote address, or see `trustProxy`. */
   clientIp?: (c: Context) => string;
@@ -82,7 +106,11 @@ export interface AppDeps {
    * Set only on a demo install (D-035): the throwaway PINs the sign-in screens show, at `GET /api/demo`. Without it the
    * route answers `{demo: false}`, so a real install can never answer with a PIN.
    */
-  demo?: { pins: { owner: string; counter: string; station: string } };
+  demo?: { pins: { owner: string; counter: string; station: string; manager: string; admin: string } };
+  /** The newest backup of the database this install can see (ms), for the admin's health page; Node reads `BACKUP_DIR`. */
+  lastBackup?: () => number | undefined;
+  /** When this process started (ms), for uptime; defaults to when the app was made. */
+  startedAt?: number;
   sessionTtlMs?: number;
   /** Comment lines on idle SSE streams, so proxies keep them open. */
   heartbeatMs?: number;
@@ -94,6 +122,12 @@ export interface App {
   events: EventEmitter;
   /** The header colour of the look in force, which the manifest and the page's theme colour follow. */
   headerColor(): string;
+  /** Days before names, review text and notes are cleared: the admin's switch, else `business.json`. */
+  retentionDays(): number;
+  /** Whether the showcase page is served now. */
+  showcaseOn(): boolean;
+  /** Writes the health counts now (before a process stops). */
+  flushTelemetry(): void;
 }
 
 export const SESSION_COOKIE = "ibow_session";
@@ -111,6 +145,10 @@ const BAD_REQUEST: ReadonlySet<OrderErrorCode> = new Set([
   "unknown_item",
   "unavailable_item",
   "bad_size",
+  "bad_extras",
+  "bad_note",
+  "bad_spot",
+  "bad_room",
   "bad_quantity",
   "total_too_large",
   "bad_rating",
@@ -149,8 +187,47 @@ export function createApp(deps: AppDeps): App {
   }
   const now = deps.now ?? Date.now;
   store.useTimeZone(config.business.timeZone);
-  /** The catalog as customers see it: catalog.json with the owner's availability switches from the store. */
-  let live = withAvailability(config, store.availability());
+  // "admin" signs in as the system admin since D-072; a staff member saved under that id before then could never sign in again.
+  // RENAME_ADMIN_STAFF renames that record once; on a Worker it is the only way in, since a Durable Object's SQL can't be
+  // reached from outside.
+  if (store.getStaff("admin") !== undefined) {
+    const to = deps.renameAdminStaff?.trim();
+    if (to === undefined || to === "") {
+      throw new Error(
+        "ibow: a staff member has the id \"admin\", which is now the system admin's sign-in (D-072); expected no such staff record, found one; set RENAME_ADMIN_STAFF=<new staff id> and start again (Node: in .env; Cloudflare: npx wrangler secret put RENAME_ADMIN_STAFF, then deploy), or on Node stop the server and run: sqlite3 data/ibow.db \"UPDATE staff SET id = '<new staff id>' WHERE id = 'admin'; DELETE FROM sessions WHERE user = 'admin'\"",
+      );
+    }
+    if (!STAFF_ID.test(to) || to === "admin" || to === "owner") {
+      throw new Error(
+        `ibow: RENAME_ADMIN_STAFF: expected a staff id (lowercase letters, digits and dashes, not admin or owner), found ${JSON.stringify(to)}`,
+      );
+    }
+    if (store.getStaff(to) !== undefined) {
+      throw new Error(`ibow: RENAME_ADMIN_STAFF: expected a free staff id, found ${JSON.stringify(to)} already taken`);
+    }
+    store.renameStaff("admin", to);
+    console.warn(
+      `ibow: renamed the staff member "admin" to "${to}" (RENAME_ADMIN_STAFF); they sign in with that id now; unset the setting`,
+    );
+  }
+
+  /**
+   * The catalog as customers see it: catalog.json with the owner's availability switches from the store, and any item
+   * whose count for today has run out switched off. Rebuilt (two tiny reads) before each place it matters.
+   */
+  let live = config;
+  function refreshLive(withCounts = true): void {
+    const switches = store.availability();
+    // Changing an order that already holds an item must not fail because the item has just run out: the store checks
+    // such a change against what is left, so edits and added lines ask for the switches alone.
+    if (withCounts) {
+      for (const [itemId, left] of store.dailyCounts(dayKey(now(), config.business.timeZone))) {
+        if (left <= 0) switches.set(itemId, false);
+      }
+    }
+    live = withAvailability(config, switches);
+  }
+  refreshLive();
   const trustProxy = deps.trustProxy ?? 0;
   const clientIp =
     deps.clientIp ?? (trustProxy > 0 ? (c: Context) => forwardedFor(c, trustProxy) ?? remoteAddress(c) : remoteAddress);
@@ -170,6 +247,21 @@ export function createApp(deps: AppDeps): App {
   const events = new EventEmitter();
   events.setMaxListeners(0);
   const http = new Hono<Env>();
+  const system = systemFlags(store, {
+    retentionDays: config.business.retentionDays,
+    ai: deps.ai !== undefined,
+    showcase: deps.demo !== undefined || config.business.showcase === true,
+  });
+  let streamsHandle: { open(): number } | undefined;
+  const telemetry = createTelemetry({
+    store,
+    now,
+    build: deps.client?.build ?? "dev",
+    startedAt: deps.startedAt ?? now(),
+    openStreams: () => streamsHandle?.open() ?? 0,
+    ...(deps.lastBackup === undefined ? {} : { lastBackup: deps.lastBackup }),
+  });
+  http.use("*", telemetry.middleware);
 
   http.onError((err, c) => {
     if (err instanceof ApiError) return c.json({ error: err.code, message: err.message }, err.status);
@@ -179,6 +271,9 @@ export function createApp(deps: AppDeps): App {
     }
     // Already worded for the owner, and never holding the key (D-026).
     if (err instanceof AiError) return c.json({ error: err.code, message: err.message }, 502);
+    if (err instanceof FlagError) {
+      return c.json({ error: err.code, message: err.message }, err.code === "no_such_flag" ? 404 : 400);
+    }
     if (err instanceof PaymentError) {
       return c.json({ error: err.code, message: err.message }, err.code === "bad_amount" ? 400 : 409);
     }
@@ -188,6 +283,14 @@ export function createApp(deps: AppDeps): App {
       500,
     );
   });
+
+  // A demo is never a business's real ordering page: search engines are told not to list it or follow its links.
+  if (deps.demo !== undefined) {
+    http.use("*", async (c, next) => {
+      await next();
+      c.res.headers.set("X-Robots-Tag", "noindex, nofollow");
+    });
+  }
 
   http.use(
     "/api/*",
@@ -214,19 +317,30 @@ export function createApp(deps: AppDeps): App {
     return input.object(raw);
   }
 
-  /** What a session may work: the owner everything, a staff member what their role says. */
-  function accessOf(session: Session): StaffRole {
-    return session.role === "owner" ? "all" : (store.getStaff(session.user)?.role ?? "all");
+  /** What a session may work: the owner and a manager everything, a staff member what their role says. */
+  function accessOf(session: Session): "counter" | "station" | "all" {
+    if (session.role === "owner" || session.role === "manager") return "all";
+    const role = store.getStaff(session.user)?.role ?? "all";
+    return role === "manager" ? "all" : role;
   }
 
-  /** `counter` means the counter's actions (payments, status, adding and serving lines): counter or all roles, or the owner. */
-  function requireRole(c: Context<Env>, role: Role | "counter"): Session {
+  /**
+   * One check for every protected route: a session whose level the table in `src/core/levels.ts` gives `power`. The
+   * counter's actions (`orders.run`) also refuse station-only staff.
+   */
+  function requirePower(c: Context<Env>, power: Power): Session {
     const session = c.get("session");
-    if (session === undefined) throw new ApiError(401, "no_session", "expected a staff or owner session, found none");
-    if (role === "owner" && session.role !== "owner") {
-      throw new ApiError(403, "forbidden", `expected the owner, found ${session.role} ${session.user}`);
+    if (session === undefined) {
+      throw new ApiError(401, "no_session", `expected a signed-in ${TABLE[power].levels.join(", ")}, found none`);
     }
-    if (role === "counter" && accessOf(session) === "station") {
+    if (!can(session.role, power)) {
+      throw new ApiError(
+        403,
+        "forbidden",
+        `expected ${TABLE[power].levels.join(" or ")} for ${power}, found ${session.role} ${session.user}`,
+      );
+    }
+    if (power === "orders.run" && accessOf(session) === "station") {
       throw new ApiError(403, "forbidden", `expected a counter role, found station staff ${session.user}`);
     }
     return session;
@@ -263,6 +377,8 @@ export function createApp(deps: AppDeps): App {
     return updated;
   }
 
+  const keys = roomKeys(store);
+  const rooms = config.zones.filter((z) => z.kind === "room").flatMap((z) => z.spots.map((s) => s.id));
   const demo = deps.demo;
   // Always answers, so a sign-in screen can ask without a console error; only a demo's answer holds PINs.
   http.get("/api/demo", (c) =>
@@ -274,24 +390,34 @@ export function createApp(deps: AppDeps): App {
             staff: [
               { id: "counter", pin: demo.pins.counter, role: "counter" },
               { id: "station", pin: demo.pins.station, role: "station" },
+              { id: "manager", pin: demo.pins.manager, role: "manager" },
             ],
             owner: { pin: demo.pins.owner },
+            admin: { pin: demo.pins.admin },
+            // A demo's room QRs are public anyway: the storefront picks a room's key from here when a link (a proposal
+            // page's `/?spot=rooms-1`) carries none (D-082). A real install never answers with a key.
+            ...(rooms.length === 0 ? {} : { roomKeys: Object.fromEntries(rooms.map((r) => [r, keys.keyFor(r)])) }),
           },
     ),
   );
 
   http.get("/api/catalog", (c) => {
-    const { name, currency, timeZone, maxQtyPerLine, cashShortcutsMinor, hours } = config.business;
+    refreshLive();
+    const left = Object.fromEntries(store.dailyCounts(dayKey(now(), config.business.timeZone)));
+    const { name, currency, timeZone, maxQtyPerLine, lateMinutes, cashShortcutsMinor, hours } = config.business;
     return c.json({
       business: {
         name,
         currency,
         timeZone,
         maxQtyPerLine,
+        lateMinutes,
         ...(cashShortcutsMinor ? { cashShortcutsMinor } : {}),
         ...(hours ? { hours } : {}),
       },
-      payments: { upi: upi !== undefined },
+      payments: { upi: upi !== undefined, card: config.business.card === true },
+      ...(config.zones.length === 0 ? {} : { zones: config.zones }),
+      ...(Object.keys(left).length === 0 ? {} : { left }),
       ...live.catalog,
     });
   });
@@ -308,6 +434,58 @@ export function createApp(deps: AppDeps): App {
     const clientKey = input.text(b.clientKey, "clientKey", 128, CLIENT_KEY);
     const lines = input.lines(b.lines);
     const name = b.customerName === undefined ? undefined : input.text(b.customerName, "customerName", 60);
+    const spotId = b.spot === undefined ? undefined : input.text(b.spot, "spot", 100);
+    if (b.pay !== undefined && b.pay !== "room")
+      throw new InputError("pay", '"room" (the room bill) or nothing', b.pay);
+    const pay = b.pay === "room" ? ("room" as const) : undefined;
+    // Only the QR in a room can charge it: its key, or staff who may run orders keying one in (D-082).
+    const session = c.get("session");
+    const staffMay = session !== undefined && can(session.role, "orders.run") && accessOf(session) !== "station";
+    if (
+      pay === "room" &&
+      spotId !== undefined &&
+      isRoom(config, spotId) &&
+      !staffMay &&
+      !keys.check(spotId, b.roomKey)
+    ) {
+      throw new ApiError(
+        403,
+        "room_key",
+        `expected the key from the QR in ${config.spots.get(spotId)?.label ?? spotId} to put the order on its room bill, found ${b.roomKey === undefined ? "none" : "a key that does not match"}; scan the QR in your room, or pay the usual way`,
+      );
+    }
+    const hours = config.business.hours;
+    // Past the last-order time customers are turned away at once; staff at the counter may still key an order in.
+    if (
+      c.get("session") === undefined &&
+      hours !== undefined &&
+      !takesOrdersAt(hours, now(), config.business.timeZone)
+    ) {
+      const zone = config.business.timeZone;
+      // A whole closed day names itself and the day ordering opens again; otherwise it is past the last-order time.
+      if (closedDayAt(hours, now(), zone)) {
+        const names: Record<string, string> = {
+          sun: "Sunday",
+          mon: "Monday",
+          tue: "Tuesday",
+          wed: "Wednesday",
+          thu: "Thursday",
+          fri: "Friday",
+          sat: "Saturday",
+        };
+        const day = (at: number) => names[businessWeekday(hours, at, zone)] as string;
+        throw new ApiError(
+          409,
+          "closed",
+          `expected an order on an open day, found ${day(now())}, a closed day; we open again on ${day(nextOpenDay(hours, now(), zone))} at ${hours.open}`,
+        );
+      }
+      throw new ApiError(
+        409,
+        "closed",
+        `expected an order before the last-order time ${hours.lastOrder}, found it after; we open at ${hours.open}`,
+      );
+    }
     if (c.get("session") === undefined && !orderLimiter.hit(clientIp(c), now())) {
       throw new ApiError(
         429,
@@ -316,6 +494,7 @@ export function createApp(deps: AppDeps): App {
       );
     }
     const at = now();
+    refreshLive();
     const id = randomUUID();
     const result = store.createOrder({
       id,
@@ -323,7 +502,16 @@ export function createApp(deps: AppDeps): App {
       clientKey,
       now: at,
       timeZone: config.business.timeZone,
-      build: (token) => createOrder(live, { id, token, now: at, lines, ...(name ? { customerName: name } : {}) }),
+      build: (token) =>
+        createOrder(live, {
+          id,
+          token,
+          now: at,
+          lines,
+          ...(name ? { customerName: name } : {}),
+          ...(spotId === undefined ? {} : { spotId }),
+          ...(pay === undefined ? {} : { pay }),
+        }),
     });
     if (result.event) events.emit("event", result.event);
     const lastEventId = result.event?.id ?? store.lastEventId();
@@ -331,7 +519,7 @@ export function createApp(deps: AppDeps): App {
   });
 
   http.get("/api/orders", (c) => {
-    requireRole(c, "staff");
+    requirePower(c, "orders.view");
     return c.json({ orders: store.openOrders().map(staffView), lastEventId: store.lastEventId() });
   });
 
@@ -349,6 +537,7 @@ export function createApp(deps: AppDeps): App {
 
   http.put("/api/orders/:id/lines", async (c) => {
     const lines = input.lines((await body(c)).lines);
+    refreshLive(false);
     const updated = change(
       () => ownOrder(c, c.req.param("id")),
       "order.updated",
@@ -363,10 +552,13 @@ export function createApp(deps: AppDeps): App {
     const updated = change(
       () => ownOrder(c, c.req.param("id")),
       "order.updated",
-      (o) => ({
-        ...o,
-        payment: claimPayment(o.payment, { method, amountMinor: orderTotal(o), now: now() }),
-      }),
+      (o) => {
+        assertNotOnRoomBill(o, "a customer's claim");
+        return {
+          ...o,
+          payment: claimPayment(o.payment, { method, amountMinor: orderTotal(o), now: now() }),
+        };
+      },
     );
     return c.json({ order: customerView(updated) });
   });
@@ -382,26 +574,39 @@ export function createApp(deps: AppDeps): App {
     return c.json({ ok: true }, 201);
   });
 
+  /** Card is a method staff record only where `business.json` says the counter has a terminal. */
+  function checkMethod(method: PaymentMethod): void {
+    if (method === "card" && config.business.card !== true) {
+      throw new ApiError(
+        409,
+        "no_card",
+        'expected a business that takes card ("card": true in business.json), found none',
+      );
+    }
+  }
+
   http.post("/api/orders/:id/confirm", async (c) => {
-    const session = requireRole(c, "counter");
+    const session = requirePower(c, "orders.run");
     const b = await body(c);
     const method = input.method(b.method, "method");
+    checkMethod(method);
     const amountMinor = input.wholeNumber(b.amountMinor, "amountMinor");
     const updated = change(
       () => load(c.req.param("id")).order,
       "order.updated",
-      (o) => ({
-        ...o,
-        payment: confirmPayment(o.payment, { by: session.user, method, amountMinor, now: now() }),
-      }),
+      (o) => {
+        assertNotOnRoomBill(o, "a counter payment");
+        return { ...o, payment: confirmPayment(o.payment, { by: session.user, method, amountMinor, now: now() }) };
+      },
     );
     return c.json({ order: staffView(updated) });
   });
 
   http.post("/api/orders/:id/topup", async (c) => {
-    const session = requireRole(c, "counter");
+    const session = requirePower(c, "orders.run");
     const b = await body(c);
     const method = input.method(b.method, "method");
+    checkMethod(method);
     const amountMinor = input.wholeNumber(b.amountMinor, "amountMinor");
     const updated = change(
       () => load(c.req.param("id")).order,
@@ -411,8 +616,35 @@ export function createApp(deps: AppDeps): App {
     return c.json({ order: staffView(updated) });
   });
 
+  /** Money handed back: amount, method, who and when go on the order and are netted in every total (D-071). */
+  http.post("/api/orders/:id/refund", async (c) => {
+    const session = requirePower(c, "refund");
+    const b = await body(c);
+    const method = input.method(b.method, "method");
+    checkMethod(method);
+    const amountMinor = input.wholeNumber(b.amountMinor, "amountMinor");
+    const updated = change(
+      () => load(c.req.param("id")).order,
+      "order.updated",
+      (o) => {
+        // A manager's limit is on the whole of one order's refunds, this one included (D-072).
+        const before = o.payment.state === "confirmed" ? (o.payment.refunds ?? []) : [];
+        const total = before.reduce((n, r) => n + r.amountMinor, 0) + amountMinor;
+        if (!mayRefund(session.role, total, config.business.managerRefundLimitMinor)) {
+          throw new ApiError(
+            403,
+            "refund_limit",
+            `expected refunds on one order up to ${refundCeiling(session.role, config.business.managerRefundLimitMinor) ?? 0} minor units for ${session.role} ${session.user}, found ${total}; ask the owner`,
+          );
+        }
+        return { ...o, payment: refundPayment(o.payment, { by: session.user, method, amountMinor, now: now() }) };
+      },
+    );
+    return c.json({ order: staffView(updated) });
+  });
+
   http.post("/api/orders/:id/advance", (c) => {
-    requireRole(c, "counter");
+    requirePower(c, "orders.run");
     const updated = change(
       () => load(c.req.param("id")).order,
       "order.status",
@@ -422,7 +654,7 @@ export function createApp(deps: AppDeps): App {
   });
 
   http.post("/api/orders/:id/undo", (c) => {
-    requireRole(c, "counter");
+    requirePower(c, "orders.run");
     const updated = change(
       () => load(c.req.param("id")).order,
       "order.status",
@@ -432,8 +664,9 @@ export function createApp(deps: AppDeps): App {
   });
 
   http.post("/api/orders/:id/lines", async (c) => {
-    requireRole(c, "counter");
+    requirePower(c, "orders.run");
     const lines = input.lines((await body(c)).lines);
+    refreshLive(false);
     const updated = change(
       () => load(c.req.param("id")).order,
       "order.updated",
@@ -443,19 +676,21 @@ export function createApp(deps: AppDeps): App {
   });
 
   http.post("/api/orders/:id/lines/:index/served", (c) => {
-    requireRole(c, "counter");
+    requirePower(c, "orders.run");
     const index = Number(c.req.param("index"));
     const updated = change(
       () => load(c.req.param("id")).order,
       "order.updated",
-      (o) => markServed(o, index),
+      (o) => markServed(o, index, now()),
     );
     return c.json({ order: staffView(updated) });
   });
 
   http.get("/api/tokens/:token", (c) => {
-    const token = c.req.param("token");
-    const order = store.findByToken(token, dayKey(now(), config.business.timeZone));
+    const day = dayKey(now(), config.business.timeZone);
+    // A person may type the order number alone ("47"): that is today's `DD-047` (M13).
+    const token = tokenForNumber(c.req.param("token"), day) ?? c.req.param("token");
+    const order = store.findByToken(token, day);
     if (order === undefined) throw new ApiError(404, "no_such_token", `expected a token issued today, found ${token}`);
     return c.json({ token: order.token, status: order.status, ready: isReady(order) });
   });
@@ -468,27 +703,35 @@ export function createApp(deps: AppDeps): App {
   }
 
   http.get("/api/stations", (c) => {
-    requireRole(c, "staff");
+    requirePower(c, "orders.view");
     return c.json({
-      stations: config.stations.map(({ id, name, view, speak, print }) => ({ id, name, view, speak, print })),
+      stations: config.stations.map(({ id, name, view, speak, print, categories }) => ({
+        id,
+        name,
+        view,
+        speak,
+        print,
+        categories,
+      })),
     });
   });
 
   /** Ready or take back lines of several orders; every order is checked before any changes, so a bad line undoes it all. */
-  function readyRoute(rule: (o: Order, stationId: string, indexes: readonly number[]) => Order) {
+  function readyRoute(rule: (o: Order, stationId: string, indexes: readonly number[], now?: number) => Order) {
     return async (c: Context<Env>) => {
-      requireRole(c, "staff");
+      requirePower(c, "orders.view");
+      const at = now();
       const stationId = station(c.req.param("id") ?? "");
       const refs = input.lineRefs((await body(c)).lines);
       const byOrder = new Map<string, number[]>();
       for (const r of refs) byOrder.set(r.orderId, [...(byOrder.get(r.orderId) ?? []), r.index]);
-      for (const [orderId, indexes] of byOrder) rule(load(orderId).order, stationId, indexes);
+      for (const [orderId, indexes] of byOrder) rule(load(orderId).order, stationId, indexes, at);
       const orders = [...byOrder].map(([orderId, indexes]) =>
         stationView(
           change(
             () => load(orderId).order,
             "order.updated",
-            (o) => rule(o, stationId, indexes),
+            (o) => rule(o, stationId, indexes, at),
           ),
           stationId,
         ),
@@ -501,7 +744,7 @@ export function createApp(deps: AppDeps): App {
   http.post("/api/stations/:id/unready", readyRoute(unmarkReady));
 
   http.get("/api/stations/:id/orders", (c) => {
-    requireRole(c, "staff");
+    requirePower(c, "orders.view");
     const stationId = station(c.req.param("id"));
     const orders = store
       .openOrders()
@@ -519,12 +762,19 @@ export function createApp(deps: AppDeps): App {
     if (!pinLimiter.hit(key, at) || !userLockout.attempt(user, at)) {
       throw new ApiError(429, "rate_limited", "expected fewer PIN attempts, found too many; wait and try again");
     }
-    let role: Role = "staff";
+    let role: Level = "staff";
     let hash: string | undefined;
     if (user === "owner") {
       role = "owner";
       hash = deps.ownerPinHash;
-    } else hash = store.getStaff(user)?.pinHash;
+    } else if (user === "admin") {
+      role = "admin";
+      hash = deps.adminPinHash;
+    } else {
+      const member = store.getStaff(user);
+      hash = member?.pinHash;
+      if (member?.role === "manager") role = "manager";
+    }
     const known = hash !== undefined;
     // Unknown user ids are checked against a dummy hash, so a reply's timing doesn't reveal which ids exist.
     const checked = await verifyPin(isPin(b.pin) ? b.pin : "00000000", hash ?? DUMMY_HASH);
@@ -533,7 +783,7 @@ export function createApp(deps: AppDeps): App {
     }
     userLockout.reset(user);
     pinLimiter.reset(key);
-    if (user !== "owner" && hash !== undefined && needsRehash(hash)) {
+    if (role !== "owner" && role !== "admin" && hash !== undefined && needsRehash(hash)) {
       // An older-format hash is replaced now, while the right PIN is in hand (the owner's lives in the settings).
       const member = store.getStaff(user);
       if (member) store.putStaff({ ...member, pinHash: await hashPin(b.pin as string) });
@@ -558,27 +808,35 @@ export function createApp(deps: AppDeps): App {
   });
 
   http.get("/api/me", (c) => {
-    const s = requireRole(c, "staff");
-    return c.json({ user: s.user, role: s.role, access: accessOf(s) });
+    const s = requirePower(c, "hub");
+    const ceiling = can(s.role, "refund") ? refundCeiling(s.role, config.business.managerRefundLimitMinor) : 0;
+    return c.json({
+      user: s.user,
+      role: s.role,
+      access: accessOf(s),
+      canRefund: ceiling === undefined || ceiling > 0,
+      ...(ceiling === undefined || ceiling === 0 ? {} : { refundLimitMinor: ceiling }),
+      powers: POWERS.filter((p) => can(s.role, p)),
+    });
   });
 
   http.get("/api/staff", (c) => {
-    requireRole(c, "owner");
+    requirePower(c, "staff.manage");
     return c.json({ staff: store.listStaff() });
   });
 
   http.put("/api/staff/:id", async (c) => {
-    requireRole(c, "owner");
+    requirePower(c, "staff.manage");
     const id = c.req.param("id");
-    if (!STAFF_ID.test(id) || id === "owner") {
-      throw new InputError("id", "a staff id of lowercase letters, digits and dashes, not owner", id);
+    if (!STAFF_ID.test(id) || id === "owner" || id === "admin") {
+      throw new InputError("id", "a staff id of lowercase letters, digits and dashes, not owner or admin", id);
     }
     const b = await body(c);
     const name = input.text(b.name, "name", 60);
     if (!isPin(b.pin)) throw new InputError("pin", "a PIN of 4 to 12 digits", "something else");
     const role = b.role === undefined ? "all" : b.role;
-    if (role !== "counter" && role !== "station" && role !== "all") {
-      throw new InputError("role", '"counter", "station" or "all"', role);
+    if (role !== "counter" && role !== "station" && role !== "all" && role !== "manager") {
+      throw new InputError("role", '"counter", "station", "all" or "manager"', role);
     }
     const pinHash = await hashPin(b.pin);
     store.putStaff({ id, name, pinHash, role });
@@ -589,26 +847,48 @@ export function createApp(deps: AppDeps): App {
 
   // ── Owner dashboard ──────────────────────────────────────────────────────────────────────────────────────────────
 
-  http.put("/api/owner/items/:id", async (c) => {
-    requireRole(c, "owner");
-    const itemId = c.req.param("id");
+  // The menu switches are the manager's too, so their path carries no level; the owner's dashboard keeps its old one.
+  http.put("/api/menu/items/:id", menuSwitch);
+  http.put("/api/owner/items/:id", menuSwitch);
+  async function menuSwitch(c: Context<Env>) {
+    requirePower(c, "menu.switch");
+    const itemId = c.req.param("id") ?? "";
     if (!config.items.has(itemId)) {
       throw new ApiError(404, "no_such_item", `expected an item id from the catalog, found ${itemId}`);
     }
     const b = await body(c);
-    if (typeof b.available !== "boolean") throw new InputError("available", "true or false", typeof b.available);
-    store.setAvailability(itemId, b.available);
-    live = withAvailability(config, store.availability());
-    return c.json({ itemId, available: b.available });
-  });
+    if (b.available === undefined && b.count === undefined) {
+      throw new InputError("available", "true or false, or a count for today", "neither");
+    }
+    if (b.available !== undefined) {
+      if (typeof b.available !== "boolean") throw new InputError("available", "true or false", typeof b.available);
+      store.setAvailability(itemId, b.available);
+    }
+    // `count` is how many are left today (a whole number, 0 sells the item out), or null to lift the limit.
+    if (b.count !== undefined) {
+      if (
+        b.count !== null &&
+        (typeof b.count !== "number" || !Number.isInteger(b.count) || b.count < 0 || b.count > 100000)
+      ) {
+        throw new InputError("count", "a whole number from 0 to 100000, or null", b.count);
+      }
+      store.setDailyCount(itemId, dayKey(now(), config.business.timeZone), b.count ?? undefined);
+    }
+    refreshLive();
+    return c.json({
+      itemId,
+      available: live.items.get(itemId)?.item.available !== false,
+      ...(typeof b.count === "number" ? { count: b.count } : {}),
+    });
+  }
 
   http.get("/api/owner/orders", (c) => {
-    requireRole(c, "owner");
-    const { timeZone, retentionDays } = config.business;
+    requirePower(c, "reports");
+    const { timeZone } = config.business;
     const day = c.req.query("day") ?? dayKey(now(), timeZone);
     if (!DAY_KEY.test(day)) throw new InputError("day", "a date as YYYY-MM-DD", day);
     const named = store
-      .namedOrdersSince(now() - retentionDays * DAY_MS)
+      .namedOrdersSince(now() - system.retentionDays() * DAY_MS)
       .map((o) => ({ name: o.name, day: dayKey(o.createdAt, timeZone) }));
     return c.json({
       day,
@@ -620,7 +900,7 @@ export function createApp(deps: AppDeps): App {
 
   /** The business's records as one JSON file, for the owner's own keeping (no sessions, no PIN hashes; docs/install.md). */
   http.get("/api/owner/export", (c) => {
-    requireRole(c, "owner");
+    requirePower(c, "reports");
     const at = now();
     const to = c.req.query("to") ?? dayKey(at, config.business.timeZone);
     const isDay = (v: string) => {
@@ -641,6 +921,7 @@ export function createApp(deps: AppDeps): App {
         `expected at most ${EXPORT_MAX_DAYS} days per export, found ${span}; ask for it in pages with from and to`,
       );
     }
+    store.setMeta("last_export", String(at));
     const body = {
       exportedAt: at,
       range: { from, to },
@@ -660,18 +941,38 @@ export function createApp(deps: AppDeps): App {
   // last change, not of the clock.
   let insightsCache: { key: string; body: unknown } | undefined;
   http.get("/api/owner/insights", (c) => {
-    requireRole(c, "owner");
+    requirePower(c, "reports");
     const { currency, timeZone } = config.business;
     const at = now();
     const key = `${store.lastEventId()}:${localTime(at, timeZone).day}`;
     if (insightsCache?.key !== key) {
-      insightsCache = { key, body: { currency, timeZone, report: buildReport(at) } };
+      const carry = store.carryStats(localTime(at, timeZone).day);
+      insightsCache = {
+        key,
+        body: {
+          currency,
+          timeZone,
+          report: buildReport(at),
+          // Open room bills (D-082): ordered, not received, until the room is settled at checkout.
+          ...(config.zones.some((z) => z.kind === "room")
+            ? (() => {
+                const open = openRoomOrders(store.openRoomOrders());
+                return { rooms: { open: open.length, totalMinor: open.reduce((n, o) => n + outstandingMinor(o), 0) } };
+              })()
+            : {}),
+          ...(carry.lines === 0
+            ? {}
+            : {
+                carry: { lines: carry.lines, averageMs: Math.round(carry.totalMs / carry.lines), maxMs: carry.maxMs },
+              }),
+        },
+      };
     }
     return c.json(insightsCache.body);
   });
 
   http.get("/api/owner/reviews", (c) => {
-    requireRole(c, "owner");
+    requirePower(c, "reports");
     const reviews = store.recentReviews(REVIEWS_SHOWN);
     const sum = reviews.reduce((n, r) => n + r.rating, 0);
     return c.json({
@@ -687,8 +988,16 @@ export function createApp(deps: AppDeps): App {
     const model = deps.ai;
     const askLimit = deps.limits?.ask ?? { max: 30, windowMs: 60 * 60_000 };
     const askLimiter = createLimiter(askLimit);
+    // The analyst panel asks first whether it is on, so the admin's switch reaches an open dashboard (D-075).
+    http.get("/api/owner/ai", (c) => {
+      requirePower(c, "ai.ask");
+      return c.json({ on: system.aiOn() });
+    });
     http.post("/api/owner/ask", async (c) => {
-      const session = requireRole(c, "owner");
+      const session = requirePower(c, "ai.ask");
+      if (!system.aiOn()) {
+        throw new ApiError(409, "ai_off", "expected the AI analyst to be on, found it switched off by the admin");
+      }
       const b = await body(c);
       const question = input.text(b.question, "question", MAX_QUESTION_CHARS);
       if (question.trim() === "") throw new InputError("question", "a question in words", question);
@@ -712,21 +1021,22 @@ export function createApp(deps: AppDeps): App {
     });
   }
 
-  const look = deps.look ?? { theme: DEFAULT_THEME, strings: {}, media: new Map(), imageOrigins: [] };
+  const look: Look = deps.look ?? { theme: DEFAULT_THEME, strings: {}, media: new Map(), imageOrigins: [] };
   const themeHandle = registerTheme(http, {
     look,
     store,
     build: deps.client?.build ?? "dev",
     timeZone: config.business.timeZone,
     now,
+    brandName: config.business.name,
   });
-  registerStreams(http, {
+  streamsHandle = registerStreams(http, {
     config,
     store,
     events,
     now,
     ownOrder,
-    requireRole,
+    requirePower,
     heartbeatMs: deps.heartbeatMs ?? 15_000,
   });
   // A liveness check for a supervisor or a smoke test: no session, no database, nothing to rate-limit.
@@ -737,8 +1047,35 @@ export function createApp(deps: AppDeps): App {
       ai: deps.ai !== undefined,
       imageOrigins: look.imageOrigins,
       themeColor: themeHandle.headerColor,
-      showcase: deps.demo !== undefined || config.business.showcase === true,
+      showcase: () => system.showcaseOn(),
     });
   }
-  return { http, events, headerColor: themeHandle.headerColor };
+  registerCalendar(http, {
+    store,
+    timeZone: config.business.timeZone,
+    currency: config.business.currency,
+    now,
+    requirePower,
+    ...(look.events === undefined ? {} : { seed: look.events }),
+  });
+  registerRooms(http, { config, store, now, requirePower, events, checkMethod });
+  registerAdmin(http, {
+    config,
+    accessOf,
+    store,
+    now,
+    requirePower,
+    system,
+    aiConfigured: deps.ai !== undefined,
+    theme: themeHandle,
+    telemetry,
+  });
+  return {
+    http,
+    events,
+    headerColor: themeHandle.headerColor,
+    retentionDays: system.retentionDays,
+    showcaseOn: system.showcaseOn,
+    flushTelemetry: () => telemetry.flush(true),
+  };
 }

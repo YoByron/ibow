@@ -14,6 +14,7 @@ export function nodeDriver(path: string): SqlDriver {
   // Deleted or overwritten content is zeroed on disk, so retention really removes a customer's name (D-016).
   db.exec("PRAGMA secure_delete = ON");
   const onDisk = path !== ":memory:";
+  let written = 0;
   if (onDisk) db.exec("PRAGMA journal_mode = WAL");
   const pragma = (name: string) => (db.prepare(`PRAGMA ${name}`).get() as Row)[name] as number;
   return {
@@ -22,7 +23,11 @@ export function nodeDriver(path: string): SqlDriver {
       return {
         get: (...p: SqlValue[]) => st.get(...p) as Row | undefined,
         all: (...p: SqlValue[]) => st.all(...p) as Row[],
-        run: (...p: SqlValue[]) => ({ changes: Number(st.run(...p).changes) }),
+        run: (...p: SqlValue[]) => {
+          const changes = Number(st.run(...p).changes);
+          written += changes;
+          return { changes };
+        },
       };
     },
     exec: (sql) => db.exec(sql),
@@ -52,6 +57,9 @@ export function nodeDriver(path: string): SqlDriver {
     afterForget() {
       if (onDisk) db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     },
+    size: () => pragma("page_count") * pragma("page_size"),
+    // Rows changed by statements, indexes not counted: a lower bound of what Cloudflare would count.
+    rowsWritten: () => written,
     close: () => db.close(),
   };
 }

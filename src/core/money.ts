@@ -74,3 +74,17 @@ export function formatWhole(minor: number, currency: string, locale?: string): s
   const unit = 10 ** minorExponent(currency);
   return formatPrice(Math.round(minor / unit) * unit, currency, locale);
 }
+
+/**
+ * An amount typed in major units ("5", "5.5", "5,50") as minor units, or undefined when it isn't a positive amount with
+ * at most the currency's decimals. Pure, so the client's refund box and its tests share it.
+ */
+export function parseMajor(text: string, currency: string): number | undefined {
+  const exp = minorExponent(currency);
+  const m = /^(\d{1,12})(?:[.,](\d{1,9}))?$/.exec(text.trim());
+  if (m === null) return undefined;
+  const fraction = m[2] ?? "";
+  if (fraction.length > exp) return undefined;
+  const minor = Number(m[1]) * 10 ** exp + (fraction === "" ? 0 : Number(fraction.padEnd(exp, "0")));
+  return Number.isSafeInteger(minor) && minor > 0 ? minor : undefined;
+}

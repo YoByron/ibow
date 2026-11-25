@@ -94,6 +94,10 @@ form.addEventListener("submit", async (e) => {
     const r = await api<{ answer: Answer }>("POST", "/api/owner/ask", { body: { question } });
     show(r.answer);
   } catch (err) {
+    if (err instanceof ApiFailure && err.code === "ai_off") {
+      on = false;
+      place();
+    }
     mount(output, h("p", { class: "error", role: "alert" }, failureText(err)));
   } finally {
     button.disabled = false;
@@ -102,9 +106,22 @@ form.addEventListener("submit", async (e) => {
 });
 
 /** Shown on the Today page while the dashboard (its navigation) is up, so not on the sign-in screen. */
+let on = true;
+let checked = 0;
 function place(): void {
   const today = location.hash === "" || location.hash === "#/";
-  panel.hidden = !(today && app.querySelector(".owner-nav") !== null);
+  const signedIn = app.querySelector(".owner-nav") !== null;
+  // The admin may switch the analyst off while the dashboard is open (D-075): asked again at most every half minute.
+  if (signedIn && Date.now() - checked > 30_000) {
+    checked = Date.now();
+    void api<{ on: boolean }>("GET", "/api/owner/ai")
+      .then((r) => {
+        on = r.on;
+        place();
+      })
+      .catch(() => undefined);
+  }
+  panel.hidden = !(today && signedIn && on);
 }
 
 new MutationObserver(place).observe(app, { childList: true });

@@ -12,7 +12,8 @@ export const EVENT_WINDOW_MS = 2 * DAY_MS;
 
 export interface RetentionOptions {
   store: Store;
-  days: number;
+  /** Days before names, review text and notes go; a function so the admin's switch applies at the next pass. */
+  days: number | (() => number);
   now: () => number;
   /** The business's time zone, so finished days can be totalled; without it only retention and pruning run. */
   timeZone?: string;
@@ -24,7 +25,8 @@ export interface RetentionOptions {
 /** Starts the schedule; the returned function stops it. */
 export function startRetention(opts: RetentionOptions): () => void {
   const run = () => {
-    const result = opts.store.forgetCustomers(opts.now() - opts.days * DAY_MS);
+    const days = typeof opts.days === "function" ? opts.days() : opts.days;
+    const result = opts.store.forgetCustomers(opts.now() - days * DAY_MS);
     opts.store.pruneEvents(opts.now() - EVENT_WINDOW_MS);
     // Every finished day not yet totalled, oldest first (D-044); a Node process can afford all of them at once.
     if (opts.timeZone !== undefined) {

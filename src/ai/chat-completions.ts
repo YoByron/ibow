@@ -4,7 +4,15 @@
  * local servers (Ollama, llama.cpp, LM Studio, vLLM) speak it, so one adapter covers both.
  */
 
-import { type Adapter, AiError, type AiSettings, type ChatModel, readBounded, scrub } from "./model.ts";
+import {
+  type Adapter,
+  AiError,
+  type AiSettings,
+  type ChatModel,
+  type ChatRequest,
+  readBounded,
+  scrub,
+} from "./model.ts";
 
 interface Completion {
   choices?: { message?: { content?: unknown } }[];
@@ -21,6 +29,12 @@ function providerMessage(raw: string): string {
     // Not JSON: the start of the text says more than nothing.
   }
   return raw;
+}
+
+/** The user message as text alone, or as content parts when images go with it (the OpenAI-compatible form). */
+function userContent(req: ChatRequest): string | unknown[] {
+  if (req.images === undefined || req.images.length === 0) return req.user;
+  return [{ type: "text", text: req.user }, ...req.images.map((url) => ({ type: "image_url", image_url: { url } }))];
 }
 
 function create(s: AiSettings): ChatModel {
@@ -40,7 +54,7 @@ function create(s: AiSettings): ChatModel {
             model: s.model,
             messages: [
               { role: "system", content: req.system },
-              { role: "user", content: req.user },
+              { role: "user", content: userContent(req) },
             ],
             max_tokens: req.maxTokens,
             temperature: 0,

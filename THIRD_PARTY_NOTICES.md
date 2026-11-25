@@ -7,17 +7,17 @@ licence. The full licence texts ship beside the assets, where noted.
 
 | Asset | Where | Licence | Copyright |
 |---|---|---|---|
-| Fluent Emoji, the 3D icon set (58 PNG files) | `src/client/assets/emoji/` | MIT, full text in `src/client/assets/LICENSE-fluent-emoji.txt` | Microsoft Corporation |
+| Fraunces, variable typeface (Latin subset) | `src/client/assets/fonts/fraunces.woff2` | SIL Open Font License 1.1 | The Fraunces Project Authors (https://github.com/undercasetype/Fraunces) |
 | Inter, variable typeface (Latin subset, `woff2`) | `src/client/assets/fonts/inter.woff2` | SIL Open Font License 1.1 | The Inter Project Authors (https://github.com/rsms/inter) |
 | Lora, variable typeface (Latin subset) | `src/client/assets/fonts/lora.woff2` | SIL Open Font License 1.1 | The Lora Project Authors (https://github.com/cyrealtype/Lora-Cyrillic), Reserved Font Name "Lora" |
 | Nunito, variable typeface (Latin subset) | `src/client/assets/fonts/nunito.woff2` | SIL Open Font License 1.1 | The Nunito Project Authors (https://github.com/googlefonts/nunito) |
 | Space Grotesk, variable typeface (Latin subset) | `src/client/assets/fonts/space-grotesk.woff2` | SIL Open Font License 1.1 | The Space Grotesk Project Authors (https://github.com/floriankarsten/space-grotesk) |
 
-The four fonts' licence text and copyright notices are in `src/client/assets/LICENSE-fonts-OFL.txt`. The fonts are
+The five fonts' licence text and copyright notices are in `src/client/assets/LICENSE-fonts-OFL.txt`. The fonts are
 served as Latin-subset `woff2` files, are not sold on their own, and the page's CSS names them `ibow-inter`, `ibow-lora`
 and so on, not by their original names.
 
-There are no other bundled images, fonts or scripts. The screenshots in `docs/media/` and the sample businesses in
+The icon set (`src/client/ui/icons.ts`) was drawn for ibow and is part of ibow (AGPL-3.0-only). There are no other bundled images, fonts or scripts. The screenshots in `docs/media/` and the sample businesses in
 `samples/` (including the service desk's `logo.svg`) were made for ibow, and the sample businesses are invented.
 
 ## Runtime dependencies
@@ -36,7 +36,7 @@ Not shipped to users: esbuild, TypeScript, Biome, Vitest, Playwright, Miniflare 
 see each package's own `LICENSE`). Wrangler and Miniflare are Cloudflare's tools; using Cloudflare's service is governed
 by Cloudflare's own terms, not by this project.
 
-## MIT licence (hono, @hono/node-server, uqr, Fluent Emoji)
+## MIT licence (hono, @hono/node-server, uqr)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
 documentation files (the "Software"), to deal in the Software without restriction, including without limitation the

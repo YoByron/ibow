@@ -151,6 +151,7 @@ describe("M5 checkpoint: insights over the sample rushes", () => {
         receivedMinor: 0,
         receivedCashMinor: 0,
         receivedUpiMinor: 0,
+        receivedCardMinor: 0,
         awaitingOrders: rush.orders.length,
         awaitingMinor: hand.total,
       });

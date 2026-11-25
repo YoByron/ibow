@@ -1,0 +1,255 @@
+{
+  "extras": [
+    {
+      "id": "shots",
+      "name": "Shots",
+      "max": 2,
+      "options": [
+        {
+          "id": "extra-shot",
+          "name": "Extra shot",
+          "price": 50
+        },
+        {
+          "id": "decaf",
+          "name": "Decaf",
+          "price": 50
+        }
+      ]
+    },
+    {
+      "id": "milk",
+      "name": "Milk",
+      "max": 1,
+      "options": [
+        {
+          "id": "soy-milk",
+          "name": "Soy milk",
+          "price": 30
+        },
+        {
+          "id": "almond-milk",
+          "name": "Almond milk",
+          "price": 50
+        },
+        {
+          "id": "oat-milk",
+          "name": "Oat milk",
+          "price": 50
+        }
+      ]
+    },
+    {
+      "id": "drink-extras",
+      "name": "Extras",
+      "options": [
+        {
+          "id": "honey",
+          "name": "Honey",
+          "price": 20
+        },
+        {
+          "id": "ice-cubes",
+          "name": "Ice cubes",
+          "price": 20
+        },
+        {
+          "id": "flavour",
+          "name": "Flavour",
+          "price": 30
+        }
+      ]
+    },
+    {
+      "id": "gluten-free",
+      "name": "Gluten-free",
+      "max": 1,
+      "options": [
+        {
+          "id": "gluten-free",
+          "name": "Gluten-free",
+          "price": 50
+        }
+      ]
+    },
+    {
+      "id": "wrap-extras",
+      "name": "Add to your wrap",
+      "options": [
+        {
+          "id": "add-egg",
+          "name": "Add egg",
+          "price": 30
+        },
+        {
+          "id": "add-cheese",
+          "name": "Add cheese",
+          "price": 60
+        }
+      ]
+    },
+    {
+      "id": "bread",
+      "name": "Bread",
+      "min": 1,
+      "max": 1,
+      "options": [
+        {
+          "id": "sourdough",
+          "name": "Sourdough",
+          "price": 0
+        },
+        {
+          "id": "rye",
+          "name": "Rye",
+          "price": 0
+        }
+      ]
+    }
+  ],
+  "categories": [
+    {
+      "id": "coffee",
+      "name": "Coffee",
+      "icon": "hot_beverage",
+      "extras": ["shots", "milk", "drink-extras"],
+      "items": [
+        {
+          "id": "espresso",
+          "name": "Espresso",
+          "price": 250,
+          "tags": ["hot"]
+        },
+        {
+          "id": "flat-white",
+          "name": "Flat white",
+          "price": 380,
+          "tags": ["hot"]
+        },
+        {
+          "id": "latte",
+          "name": "Latte",
+          "variants": [
+            {
+              "size": "Regular",
+              "price": 400
+            },
+            {
+              "size": "Large",
+              "price": 480
+            }
+          ],
+          "tags": ["hot"]
+        },
+        {
+          "id": "iced-latte",
+          "name": "Iced latte",
+          "price": 450,
+          "tags": ["cold"]
+        }
+      ]
+    },
+    {
+      "id": "smoothies",
+      "name": "Smoothies & Shakes",
+      "icon": "cup_with_straw",
+      "items": [
+        {
+          "id": "mango-smoothie",
+          "name": "Mango smoothie",
+          "price": 550,
+          "diet": "veg",
+          "tags": ["vegan", "gluten-free"]
+        },
+        {
+          "id": "berry-shake",
+          "name": "Berry shake",
+          "price": 580,
+          "diet": "veg",
+          "tags": ["gluten-free"]
+        },
+        {
+          "id": "chia-pudding",
+          "name": "Chia pudding",
+          "price": 520,
+          "diet": "veg",
+          "station": "smoothies",
+          "tags": ["vegan", "gluten-free"]
+        }
+      ]
+    },
+    {
+      "id": "mains",
+      "name": "Kitchen",
+      "icon": "fork_and_knife_with_plate",
+      "items": [
+        {
+          "id": "burrito",
+          "name": "Veg burrito",
+          "price": 950,
+          "diet": "veg",
+          "extras": ["gluten-free", "wrap-extras"]
+        },
+        {
+          "id": "pancakes",
+          "name": "Banana pancakes",
+          "price": 780,
+          "diet": "veg",
+          "extras": ["gluten-free"]
+        },
+        {
+          "id": "toast",
+          "name": "Avocado toast",
+          "price": 890,
+          "diet": "veg",
+          "extras": ["bread"],
+          "tags": ["vegan"]
+        },
+        {
+          "id": "masala-eggs",
+          "name": "Masala eggs",
+          "price": 720,
+          "diet": "egg"
+        }
+      ]
+    },
+    {
+      "id": "cakes",
+      "name": "Cakes",
+      "icon": "croissant",
+      "items": [
+        {
+          "id": "carrot-cake",
+          "name": "Carrot cake",
+          "price": 420,
+          "diet": "veg",
+          "tags": ["contains-nuts"]
+        },
+        {
+          "id": "lemon-tart",
+          "name": "Lemon tart",
+          "price": 450,
+          "diet": "veg"
+        }
+      ]
+    }
+  ],
+  "filters": [
+    {
+      "id": "vegan",
+      "name": "Vegan",
+      "tag": "vegan"
+    },
+    {
+      "id": "gluten-free",
+      "name": "Gluten-free",
+      "tag": "gluten-free"
+    },
+    {
+      "id": "no-nuts",
+      "name": "No nuts",
+      "tag": "contains-nuts",
+      "mode": "exclude"
+    }
+  ]
+}

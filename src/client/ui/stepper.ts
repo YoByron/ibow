@@ -51,6 +51,6 @@ export function addButton(opts: {
       on: { click: opts.onClick },
     },
     opts.text,
-    h("i", {}, opts.count ? `×${opts.count}` : "+"),
+    h("i", opts.count ? { class: "n" } : {}, opts.count ? `×${opts.count}` : "+"),
   );
 }

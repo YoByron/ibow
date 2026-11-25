@@ -5,6 +5,7 @@
 
 import { LABELS, type LabelKey, type LabelOverrides } from "../core/labels.ts";
 import { type Pluralised, pluralKey } from "../core/plural.ts";
+import { orderNumber, orderNumbers } from "../core/tokens.ts";
 
 export const lang = "en";
 export const en = LABELS;
@@ -24,7 +25,18 @@ export function useStrings(all: Readonly<Record<string, LabelOverrides>>, langua
 }
 
 /** The string for `key` with `{placeholders}` filled; an unknown placeholder stays visible rather than vanishing. */
+/** `{token}` and `{tokens}` in any label read as order numbers ("#47"), never as the stored `25-047` (M13). */
+function readable(vars: Readonly<Record<string, string>>): Readonly<Record<string, string>> {
+  if (vars.token === undefined && vars.tokens === undefined) return vars;
+  return {
+    ...vars,
+    ...(vars.token === undefined ? {} : { token: orderNumber(vars.token) }),
+    ...(vars.tokens === undefined ? {} : { tokens: orderNumbers(vars.tokens) }),
+  };
+}
+
 export function t(key: StringKey, vars: Readonly<Record<string, string>> = {}): string {
+  vars = readable(vars);
   return (overrides[key] ?? LABELS[key]).replace(/\{(\w+)\}/g, (whole, name: string) => vars[name] ?? whole);
 }
 

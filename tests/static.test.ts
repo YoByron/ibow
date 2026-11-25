@@ -58,7 +58,7 @@ describe("the static client", () => {
 
   test("serves the showcase at /showcase with the strict policy when turned on", async () => {
     const http = new Hono();
-    registerClient(http, loadClient(dir), { name: "The Tea House", showcase: true });
+    registerClient(http, loadClient(dir), { name: "The Tea House", showcase: () => true });
     const res = await http.request("/showcase");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-security-policy")).toContain("default-src 'self'");
@@ -148,7 +148,9 @@ describe("the showcase through createApp (Node)", () => {
       store: openStore(":memory:"),
       ownerPinHash: "unused",
       client: loadClient(dir),
-      ...(opts.demo ? { demo: { pins: { owner: "111111", counter: "1111", station: "2222" } } } : {}),
+      ...(opts.demo
+        ? { demo: { pins: { owner: "111111", counter: "1111", station: "2222", manager: "3333", admin: "444444" } } }
+        : {}),
     }).http;
     return (await http.request("/showcase")).status;
   };

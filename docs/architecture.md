@@ -32,7 +32,8 @@ functions, so all behaviour is unit-testable with no server.
 | `src/server` | HTTP routes, SSE streams per audience (order, counter, station, owner), auth sessions, static client | Hold business rules (delegate to core) |
 | `src/client` | Customer, counter, station and owner pages: vanilla TS, Web Speech, Vibration and Notification APIs, 80mm print CSS | Depend on a UI framework or a CDN at runtime |
 | `src/demo` | Seed a demo database from a sample's rush (today and the past week, through the real rules; D-019) | Run on a database the demo didn't mark |
-| `src/ai` | The one door to any model (`model.ts`: the `Adapter` interface, settings, `AiError`; `chat-completions.ts`: the one adapter; `index.ts`: the adapter list; D-026), and the AI analyst (`analyst.ts`: named figures from insights, the prompt, the number check; D-027) | Be required (everything works without it), hold a vendor SDK, or see a customer name, review text or the key outside the server |
+| `src/ai` | The one door to any model (`model.ts`: the `Adapter` interface, settings, `AiError`; `chat-completions.ts`: the one adapter; `index.ts`: the adapter list; D-026), and the AI analyst (`analyst.ts`: named figures from insights, the prompt, the number check; D-027), and the menu reader (`menu-reader.ts`: the prompt that turns a menu page into JSON; requests may carry images, D-091, D-092) | Be required (everything works without it), hold a vendor SDK, or see a customer name, review text or the key outside the server |
+| `src/import` | Menu import for `npm run import-menu` (M15): files to model parts, HTML stripped in code, PDF refused, text split under a budget (`inputs.ts`; D-093, D-095); the model's readings to a checked catalog with a review list (`catalog.ts`; D-092, D-094) | Call a model itself (it goes through `src/ai`), guess a price, or write a catalog `parseCatalog` refuses |
 
 ## Contracts
 - **Config** (`config/business.json`, `config/catalog.json`, `config/stations.json`), validated at boot; a bad file
@@ -48,6 +49,26 @@ functions, so all behaviour is unit-testable with no server.
   - catalog: `categories[{id, name, icon?, items[{id, name, price? | variants[{size, price}], tags?, description?, image?, diet?, available?}]}]`. An item
     is anything sold: a dish, a drink, a packed good or a service. `icon` is a bundled icon name; `image` a file in the config
     folder or an https URL; `diet` is `veg`, `non-veg` or `egg`; `description` shows only when present.
+  - Order-at-counter venues (M10, D-063 to D-068). `business.json` also takes `lateMinutes` (1 to 120, default 6: after it, an
+    order handed over in part or a line left ready counts as late for the runner) and `hours.lastOrder` (`HH:MM` inside the
+    open hours: customers' orders stop after it, `409 closed`; staff can still key one in; without it hours only describe the shop).
+    `catalog.json` may hold `extras`: a library `[{id, name, min?, max?, options: [{id, name, price}]}]` (option ids unique across
+    the whole library; `price` may be 0; `min` default 0, `max` default the option count), named by id in `extras: [groupId]` on a
+    category (all its items) or an item, and `station` on an item (its own station, overriding its category's), and `filters`:
+    `[{id, name, tag, mode?: "include"|"exclude"}]`, chips on the storefront from item `tags`. `spots.json` (optional, `[]` allowed): zones
+    `[{id, name, count, prefix?} | {id, name, spots: [name]}]`; a spot's id is `<zone>-<slug>` and its label `<zone name> <spot>`
+    ("Garden T4"). An order line is `{itemId, size?, qty, extras?: [optionId], note?}` (note trimmed, at most 80 characters) and the order
+    takes `spot` (a spot id) on creation. The order stores the label as `spot`, each line its extras as `[{id, name, priceMinor}]`
+    (names and prices fixed when added, like the unit price, which includes them), its note, and `readyAt`/`servedAt`.
+    Errors: `bad_extras`, `bad_note`, `bad_spot` (400), `sold_out` (409).
+  - Stays and events (M14). A zone may be `"kind": "room"`: its spots are rooms, and an order from one may carry `pay: "room"`
+    (the room bill, `roomBill: {room, settlement?}`; customers see `roomBill: "open" | "settled"`; `400 bad_room` elsewhere;
+    the counter's confirm and the guest's claim answer `409 room_bill` while it is open; D-082). `GET /api/rooms` and
+    `POST /api/rooms/:room/settle {method, amountMinor}` (`orders.run`; `409 room_changed` / `nothing_to_settle`; D-083).
+    `events.json` (optional): `[{title, date, start, end?, note?, price?, audience?: "all"|"staff", rush?, repeat?: {weekdays:
+    ["sun", …], until?}}]`, seeded once; `GET /api/events` (anyone: guest events; signed in: all; the next occurrence of
+    each in 7 days), `GET /api/events/all`, `POST /api/events`, `PUT` and `DELETE /api/events/:id` (`events.manage`;
+    `400 bad_event`, `409 too_many_events`; D-084). The owner's insights carry `rooms: {open, totalMinor}` with a room zone.
   - theme (optional, `theme.json`, D-047) and strings (optional, `strings.<locale>.json`): the look and the customer's words, below.
   - stations: `[{id, name, categories[], view?: "batch"|"jobs", speak: true|false, print: "ticket-80mm"|null}]`.
     `view` (default `batch`) is how the station screen shows its work: `batch` totals open lines across orders and
@@ -123,7 +144,7 @@ line, add items, call the token aloud, print a receipt, undo within 5 minutes (c
 long), and a quick-order panel for walk-ins (catalog, cart, cash or a UPI QR for the exact total). Station: own open
 lines only, live over its SSE stream; batch view (the core batch text, replay, ready per batch line or all) or jobs
 view (a card per order, ready per line or per job); an Undo chip takes back the last ready tap for 5 minutes.
-Station staff (role `station`) see only stations. Shared modules: `voice.ts` (one speech queue, so call-outs never
+Station staff (role `station`) see only stations. `#/runner` (any non-station role) lists open orders with their spot and each line's station and state ("2 of 3 delivered, waiting on Smoothies"), late ones first, announced once and spoken; "Delivered" marks a line served (D-067). `options-sheet.ts` is the one sheet (size, extras within each group's min and max, note, quantity) the storefront and the counter's walk-in panel both open for an item with sizes or extras; the cart page has a note field per line and a "where are you sitting" choice preset by `/?spot=<id>`. The owner's `#/spots` page (shown only with spots) prints one QR card per spot (`owner-spots.ts`). Shared modules: `voice.ts` (one speech queue, so call-outs never
 overlap; rate and mute kept per device in localStorage), `staff-strings.ts` (the staff strings, apart so the storefront doesn't carry them), `staff.css`, `cash.ts` (cash options and change due), `print.ts` (80mm
 station ticket and counter receipt into `#print`, which only `@media print` shows, 72 mm wide), `live.ts`
 (`followStream` for any audience). Every page links `/theme.css` before `style.css` (the components, `ui/ui.css`); the storefront adds `store.css`. Components in `src/client/ui/`: `button`, `chip` (pill and badge), `card` (and quick card), `sheet`, `stepper` (and the ADD button), `tabbar`, `header` (the awning), `stat`, `timeline`, `keypad`, `toast`, `skeleton`, `icon`, plus `theme-client` (the toggles from `/api/theme`, the dark-mode choice kept on the device, the live sheet swap). The storefront is a menu (header with search, category rail, favourites, recent and live-token cards, item cards with tags, description, veg marker, photo or tinted tile, ADD to stepper; a size sheet for items with sizes), a cart (lines, payment choice, name, total, place order), the token page (a ticket with the token large and the day small, status pill, typical wait when known, items, total and payment, a timeline built from what the order really holds, payment, edit, review) and token lookup, under a Menu, Cart and Track tab bar and a floating cart bar. Favourites and the last ten orders are kept on the phone only (`local.ts`); a kiosk keeps nothing. The owner's dashboard is `/owner` (`owner.html`, `owner.ts`, `owner-appearance.ts` for the Appearance screen, `owner-view.ts` for the pure parts, `owner-strings.ts`,
@@ -138,10 +159,11 @@ A kiosk keeps everything in memory and resets by reloading, so nothing of one cu
 ## HTTP API (`src/server/app.ts`; JSON in and out, errors as `{error: <code>, message}`)
 | Who | Routes |
 |---|---|
-| Anyone | `GET /theme.css` (the tokens; ETag of build and theme version) · `GET /api/theme` (version, header style, logo, category icons, toggles, labels per locale, the computed `popular` tags and `etaMinutes`) · `GET /media/<file>` (only config-folder images the theme or catalog names) · `GET /api/catalog` (business `{name, currency, timeZone, maxQtyPerLine, cashShortcutsMinor?}`, `payments: {upi}`, categories) · `POST /api/orders` `{clientKey, lines, customerName?}` (idempotent by `clientKey`; returns the order, its secret `key` and `lastEventId`) · `GET /api/tokens/:token` (today's status and whether it is ready, nothing else) · `POST /api/login` `{user, pin}` · `POST /api/logout` |
+| Anyone | `GET /theme.css` (the tokens; ETag of build and theme version) · `GET /api/theme` (version, header style, logo, category icons, toggles, labels per locale, the computed `popular` tags and `etaMinutes`) · `GET /media/<file>` (only config-folder images the theme or catalog names) · `GET /api/catalog` (business `{name, currency, timeZone, maxQtyPerLine, lateMinutes, cashShortcutsMinor?, hours?}`, `payments: {upi}`, `zones?`, `extras?`, `filters?`, `left?` (today's counts), categories) · `POST /api/orders` `{clientKey, lines, customerName?, spot?}` (idempotent by `clientKey`; returns the order, its secret `key` and `lastEventId`) · `GET /api/tokens/:token` (today's status and whether it is ready, nothing else) · `POST /api/login` `{user, pin}` · `POST /api/logout` |
 | Customer, with `X-Order-Key` or `?key=` | `GET /api/orders/:id` · `PUT /api/orders/:id/lines` (edit) · `POST /api/orders/:id/claim` · `GET /api/orders/:id/upi` (`{intent}` for the exact total, `404 no_upi` if not offered) · `POST /api/orders/:id/review` `{rating: 1–5, text?}` (once, after completion; stores no customer details) |
 | Staff or owner session (confirm, top-up, add lines, advance, undo and served need a `counter` or `all` role) | `GET /api/orders` (open, with `lastEventId`) · `GET /api/stations` (`{id, name, view, speak, print}` each) · `GET /api/stations/:id/orders` · `POST /api/stations/:id/ready` and `…/unready` `{lines: [{orderId, index}]}` (several orders at once; all checked before any changes; lines already in that state or served are left as they are) · `POST /api/orders/:id/confirm` `{method, amountMinor}` · `…/topup` `{method, amountMinor}` (only on a confirmed payment, at most what is owed: `409 overpay`) · `…/advance` · `…/undo` · `POST /api/orders/:id/lines` (add) · `…/lines/:index/served` · `GET /api/me` |
-| Owner session | `GET /api/owner/theme` (config theme, effective theme, whether overridden, contrast failures) · `PUT /api/owner/theme` (the override; 400 `bad_theme` names the field) · `DELETE /api/owner/theme` (reset to config) · `GET /api/staff` · `PUT /api/staff/:id` `{name, pin, role?}` (`counter`, `station` or `all`, the default; D-014) · `PUT /api/owner/items/:id` `{available}` (kept in the store, applied to the catalog and order rules at once; D-017) · `GET /api/owner/orders?day=YYYY-MM-DD` (the day's orders in every status, default today, plus `regulars`: earlier visit days by name key; D-018) · `GET /api/owner/insights` (`{currency, timeZone, report}`) · `GET /api/owner/reviews` (latest 50 with tokens, `count`, `averageRating`) · `GET /api/owner/export?from=&to=` (a day range, 7 days by default, 31 at most, as JSON with no sessions or PIN hashes; D-037, D-043) · with AI on only: `POST /api/owner/ask` `{question}` (1 to 500 characters; 30 an hour per session, `429 rate_limited`) → `{answer: {text, figures: [{key, label, value, unit}], unverified, grounded}}`, or `502` with `ai_timeout`, `ai_unreachable`, `ai_refused` or `ai_bad_reply` (D-027, D-028) |
+| Owner session | `GET /api/owner/theme` (config theme, effective theme, whether overridden, contrast failures) · `PUT /api/owner/theme` (the override; 400 `bad_theme` names the field) · `DELETE /api/owner/theme` (reset to config) · `GET /api/staff` · `PUT /api/staff/:id` `{name, pin, role?}` (`counter`, `station` or `all`, the default; D-014) · `PUT /api/owner/items/:id` `{available?, count?}` (kept in the store, applied to the catalog and order rules at once; D-017; `count` is how many are left today, 0 sells out, `null` lifts the limit; D-068) · `GET /api/owner/orders?day=YYYY-MM-DD` (the day's orders in every status, default today, plus `regulars`: earlier visit days by name key; D-018) · `GET /api/owner/insights` (`{currency, timeZone, report, carry?: {lines, averageMs, maxMs}}`) · `GET /api/owner/reviews` (latest 50 with tokens, `count`, `averageRating`) · `GET /api/owner/export?from=&to=` (a day range, 7 days by default, 31 at most, as JSON with no sessions or PIN hashes; D-037, D-043) · with AI on only: `POST /api/owner/ask` `{question}` (1 to 500 characters; 30 an hour per session, `429 rate_limited`) → `{answer: {text, figures: [{key, label, value, unit}], unverified, grounded}}`, or `502` with `ai_timeout`, `ai_unreachable`, `ai_refused` or `ai_bad_reply` (D-027, D-028) |
+| By power (`src/core/levels.ts`; D-072 to D-076) | `GET /api/me` (any level: `{user, role, access, canRefund, refundLimitMinor?, powers}`) · `GET /api/hub` (anyone: the links the level may open, grouped; D-074) · `POST /api/orders/:id/refund` `{method, amountMinor}` (`refund`: a manager up to `managerRefundLimit` on one order, `403 refund_limit`; the owner any; `409 over_refund` / `bad_state`; D-071) · `PUT /api/menu/items/:id` (`menu.switch`, the same as the owner path) · `GET /api/flags` and `PUT /api/flags/:key` `{value}` (the look's by the owner, the system's by the admin, audited; D-075) · `GET /api/admin/health` (`telemetry`: counts, verdict, rows today, size, uptime, backup; D-076) · `GET /api/owner/ai` (`ai.ask`: `{on}`) |
 
 Request bodies over 16 KB get `413 too_large`. Open SSE streams are capped at 3 per customer order and 5 per staff session (`429 too_many_streams`), and the
 server accepts at most 1000 sockets. Rate limits (in memory, per install): 60 new orders a minute per client address, staff sessions exempt; 5 PIN
@@ -158,7 +180,53 @@ Credentials a client holds:
   `?key=` (`EventSource` can't set headers), so it may appear in a reverse proxy's access log; keep those logs private
   and short-lived, or strip the query string from them.
 
+## Levels and powers (D-072)
+
+Four levels, each signing in with its own PIN at `/admin` or at a screen's own sign-in: **staff** (counter and stations,
+narrowed further by the staff member's own `counter`, `station` or `all` role), **manager** (a staff member the owner
+creates with the role `manager`; day to day), **owner** (`OWNER_PIN_HASH`) and **admin** (`ADMIN_PIN_HASH`, the install
+itself: it sees no customer or sales data). The one table is `src/core/levels.ts`; every route asks it, the links hub reads
+it, and `tests/levels.test.ts` fails if this copy drifts from it.
+
+<!-- powers:start -->
+| Power | What it lets a person do | staff | manager | owner | admin |
+|---|---|:-:|:-:|:-:|:-:|
+| `orders.view` | See open orders on the counter, stations and runner screens | yes | yes | yes |  |
+| `orders.run` | Take payment, serve, advance and add to orders (a staff member's own role may narrow it) | yes | yes | yes |  |
+| `refund` | Hand money back on an order (a manager up to `managerRefundLimit` on one order) |  | yes | yes |  |
+| `menu.switch` | Switch items on or off and set today's counts |  | yes | yes |  |
+| `events.manage` | Add, change and delete the business's events, and who sees each |  | yes | yes |  |
+| `reports` | Read the dashboard, orders, reviews and the export |  |  | yes |  |
+| `staff.manage` | Add staff and managers, change their PINs and roles |  |  | yes |  |
+| `look.edit` | Change the Appearance and the spots |  |  | yes |  |
+| `flags.look` | Flip the look and menu switches (the theme's features) |  |  | yes |  |
+| `ai.ask` | Ask the AI analyst (when it is on) |  |  | yes |  |
+| `flags.system` | Flip the system switches: AI analyst on or off, retention days, showcase |  |  |  | yes |
+| `telemetry` | Read the install's health: requests, errors, streams, rows, size, uptime, backup |  |  |  | yes |
+| `hub` | Open the links hub at /admin and see the links your level may open | yes | yes | yes | yes |
+<!-- powers:end -->
+
 ## Field notes (append what the real world taught us; keep it short)
+- M15 (menu import, against a fake model only so far): prices must not be converted with floats (`20.555 * 100` is
+  2055.4999…), so the importer works on the digits. A menu page whose items are drawn by scripts has no menu in its HTML;
+  the importer says so and asks for a screenshot or saved text. A model reply cut off at `max_tokens` is invalid JSON, so the
+  part is listed as unread rather than half-imported. Still to learn from a real vision model: how often it marks
+  `unsure`, keeps sizes apart, and returns bare JSON.
+- M12: an open page learns the look changed by comparing the theme's `version`, which hashed only the CSS, so a switch (a feature,
+  the logo) changed no version and never reached it; the version now covers everything `/api/theme` carries. Free-plan rows
+  are counted per UTC day; a Durable Object reports rows written itself (indexes included), Node only rows changed. Durations
+  on Workers measure waiting, not CPU, because the clock stands still during synchronous work. A link in the hub must be
+  filtered by the page's own gate, not only the API's: the owner's tabs open for the owner only, so the manager's menu is its
+  own staff screen (`#/manager`).
+- M10 (a garden cafe, from its reviews): the failures were operational, not menu: orders split across stations arrived in part
+  and the rest never came, changes to a dish (vegan mayo, less spice) were lost, drinks stood ready until cold, cakes sold out
+  unseen, staff shouted names to find people. Hence a spot on every order, extras and notes on every line, the runner screen
+  with a late alert, ready-to-delivered minutes, a daily count and a last-order time. A station's batch rows show each
+  order's spot beside its token, and the spoken batch says it after the token (D-073), so the person carrying a drink knows
+  where to take it; the runner and the counter show it as before. Notes are customer-typed text and can hold a name, so
+  they are cleared with names (D-073).
+- M10: a count that reaches zero switches the item off for new orders, but must not stop the customer editing an order that
+  already holds it, so edits check the count in the store, not the switch.
 - M8: a page may set styles through CSSOM (`el.style.width = …`), which the strict policy allows, but not through a
   `style` attribute or `setAttribute("style")`. A preview that must not touch the page around it sets the theme's custom
   properties on its own frame. A service worker that precaches the theme sheet must serve it stale while revalidating
@@ -271,3 +339,29 @@ Credentials a client holds:
   `[env.x.alias]`, and loses to a `paths` entry in `tsconfig.json`: so there are four `ibow-*` aliases, a second config
   file for the demo, and no `paths`. `wrangler deploy --dry-run --outdir` builds and checks everything without logging in.
 - `@cloudflare/vitest-pool-workers` wants vitest 4.x; the Worker tests use Miniflare from plain vitest (`tests/support/worker.ts`).
+- Windows: run vitest from a working directory spelled with a capital drive letter (`C:\…`). From `c:\…` every test file
+  fails with "Vitest failed to find the current suite": the runner and the test files load two copies of vitest. Under
+  PowerShell, `bash` is WSL's, which mangles Windows paths, so the shell-script tests (`release-sync`, `server-kit`) pass
+  only from Git Bash; `npm run gate` from Git Bash in `C:/…` is the clean run.
+- The Node server reads `dist/client` into memory when it starts: after `npm run build` a running server keeps serving the
+  old client until it restarts. Screenshots of a changed client also need the origin's storage cleared first, or the
+  service worker serves the cached build.
+- Behind Cloudflare (a tunnel or a proxied domain), the zone's default Browser Cache TTL rewrites our `cache-control:
+  no-cache` on `.js`, `.css` and images to `max-age=14400`, so a returning phone kept the old scripts and sheets for four
+  hours after an update while the page itself was new. Pages now name their files with the build (`/app.js?b=<build>`,
+  D-081); HTML and the API stay uncached (`DYNAMIC`). An install can also set the zone to "Respect existing headers".
+- M14: Hono keeps one `onError` per app, and a later `http.onError` in a route module replaces the app's own, so every error
+  became a 500 (seen when the events module added one). A route module throws `ApiError` (or a core error the app already
+  maps) and never registers its own handler.
+- M14: a nested `d.tx` throws "cannot start a transaction within a transaction" on `node:sqlite`; a store method that saves
+  several orders at once (a room's settlement) writes them through the inner `writeOrder`, inside its own one transaction.
+- M14: class names in `staff.css` are broad (`.row>button`, `.check`): a new component that reuses `row` or `check` gets
+  their look and loses its own (a primary button turned pale). New screens use prefixed names (`ev-`, `room-`).
+- M14: a demo kept running (`demo-serve`) used to show the day after its seed as almost empty, since only that first day was
+  seeded; seeding from one random stream per day lets an hourly top-up add exactly what a fresh seed would have (D-086).
+- M14 review: a room spot alone is not proof of being in the room; a spot id is guessable ("rooms-3"), so anything that
+  charges a person must carry something only that place holds (the QR's HMAC key, D-082). A demo is the exception that
+  publishes its keys.
+- M14 review: a Durable Object's SQL can't be reached by `wrangler` or any script from outside; a one-time data fix on a
+  Worker has to be a setting the object reads at start (`RENAME_ADMIN_STAFF`, D-087) or a route.
+

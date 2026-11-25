@@ -2,7 +2,17 @@
 
 import { majorAmount } from "./money.ts";
 
-export type PaymentMethod = "upi" | "cash";
+export type PaymentMethod = "upi" | "cash" | "card";
+
+export const PAYMENT_METHODS: readonly PaymentMethod[] = ["cash", "upi", "card"];
+
+/** Money a staff member handed back for an order already paid. Ordered is unchanged; Received falls by `amountMinor`. */
+export interface Refund {
+  method: PaymentMethod;
+  amountMinor: number;
+  at: number;
+  by: string;
+}
 
 /** An extra amount staff took after the first confirmation, for lines added to an order already paid. */
 export interface TopUp {
@@ -27,11 +37,19 @@ export type Payment =
       at: number;
       by: string;
       topUps?: readonly TopUp[];
+      /** Money handed back. `amountMinor` stays what was received; what is kept is `amountMinor` less the refunds. */
+      refunds?: readonly Refund[];
     };
 
 export const UNPAID: Payment = Object.freeze({ state: "unpaid" });
 
-export type PaymentErrorCode = "bad_amount" | "bad_state" | "no_staff" | "bad_vpa" | "unsupported_currency";
+export type PaymentErrorCode =
+  | "bad_amount"
+  | "over_refund"
+  | "bad_state"
+  | "no_staff"
+  | "bad_vpa"
+  | "unsupported_currency";
 
 export class PaymentError extends Error {
   readonly code: PaymentErrorCode;
@@ -128,4 +146,44 @@ export function topUpPayment(
   }
   const topUps = [...(payment.topUps ?? []), { method, amountMinor, at: now, by }];
   return { ...payment, amountMinor: total, topUps };
+}
+
+/** What one method took in on a confirmed payment: the confirmation and each top-up, before refunds. */
+function receivedBy(payment: Extract<Payment, { state: "confirmed" }>, method: PaymentMethod): number {
+  const topUps = payment.topUps ?? [];
+  const base = payment.amountMinor - topUps.reduce((n, t) => n + t.amountMinor, 0);
+  const extra = topUps.filter((t) => t.method === method).reduce((n, t) => n + t.amountMinor, 0);
+  return (payment.method === method ? base : 0) + extra;
+}
+
+/** What a payment still holds: received less refunded. Zero unless a person confirmed it. */
+export function keptMinor(payment: Payment): number {
+  if (payment.state !== "confirmed") return 0;
+  return payment.amountMinor - (payment.refunds ?? []).reduce((n, r) => n + r.amountMinor, 0);
+}
+
+/**
+ * A staff member records money handed back: how much, by which method, who and when. Only money a person confirmed can
+ * be refunded, and no method gives back more than it took in. Whether this person may is the caller's check
+ * (`src/core/levels.ts`); Ordered stays as it was and only Received falls.
+ */
+export function refundPayment(
+  payment: Payment,
+  { by, method, amountMinor, now }: { by: string; method: PaymentMethod; amountMinor: number; now: number },
+): Payment {
+  if (by.trim() === "") throw new PaymentError("no_staff", "refundPayment: expected a staff id, found an empty one");
+  if (payment.state !== "confirmed") {
+    throw new PaymentError("bad_state", `refundPayment: expected a confirmed payment, found ${payment.state}`);
+  }
+  checkAmount("refundPayment", amountMinor);
+  const refunds = payment.refunds ?? [];
+  const back = refunds.filter((r) => r.method === method).reduce((n, r) => n + r.amountMinor, 0);
+  const left = receivedBy(payment, method) - back;
+  if (amountMinor > left) {
+    throw new PaymentError(
+      "over_refund",
+      `refundPayment: expected at most ${left} minor units back by ${method}, found ${amountMinor}`,
+    );
+  }
+  return { ...payment, refunds: [...refunds, { method, amountMinor, at: now, by }] };
 }

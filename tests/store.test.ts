@@ -67,7 +67,7 @@ describe("store", () => {
     const path = join(tempDir(), "ibow.db");
     const a = openStore(path);
     // The theme override is migration 13 on every branch (10 to 12 belong to the cloudflare branch).
-    expect(a.schemaVersion()).toBe(13);
+    expect(a.schemaVersion()).toBe(21);
     const { order } = create(a);
     a.close();
     const b = fresh(path);

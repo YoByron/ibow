@@ -55,6 +55,10 @@ declare module "ibow-catalog" {
   const value: unknown;
   export default value;
 }
+declare module "ibow-spots" {
+  const value: unknown;
+  export default value;
+}
 declare module "ibow-stations" {
   const value: unknown;
   export default value;

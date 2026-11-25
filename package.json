@@ -23,7 +23,8 @@
     "backup": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/backup.ts",
     "screenshots": "node --disable-warning=ExperimentalWarning scripts/screenshots.ts",
     "hash-pin": "node scripts/hash-pin.ts",
-    "set-links": "node scripts/set-links.ts"
+    "set-links": "node scripts/set-links.ts",
+    "import-menu": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/import-menu.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

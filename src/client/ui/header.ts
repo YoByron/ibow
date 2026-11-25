@@ -30,7 +30,8 @@ export function appHeader(o: HeaderOptions): HTMLElement {
       o.back,
       o.logo && h("span", { class: "logo" }, iconRef(o.logo)),
       h("div", { class: "brand" }, h("h1", {}, title), o.subtitle && h("p", {}, o.subtitle)),
-      ...(o.actions ?? []),
+      // One group, so on a narrow phone the actions move below the name together instead of squeezing it.
+      o.actions && o.actions.length > 0 && h("div", { class: "hacts" }, ...o.actions),
     ),
     o.below,
   );

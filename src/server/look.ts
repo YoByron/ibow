@@ -6,6 +6,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
+import { parseEvents } from "../core/calendar.ts";
 import { type Catalog, ConfigError } from "../core/config.ts";
 import { parseStrings } from "../core/labels.ts";
 import { DEFAULT_THEME, parseTheme, themeImages } from "../core/theme.ts";
@@ -73,7 +74,10 @@ export function loadLook(dir: string, catalog: Catalog): Look {
     }
     media.set(ref, { body: readFileSync(path), type: IMAGE_TYPES[extname(ref).toLowerCase()] as string });
   }
-  return { theme, strings, media, imageOrigins: [...origins].sort() };
+  // The calendar's first events (D-084): optional, checked here so a bad file stops the boot with its field.
+  const eventsFile = join(dir, "events.json");
+  const events = existsSync(eventsFile) ? parseEvents(readJson(eventsFile), "events.json") : undefined;
+  return { theme, strings, media, imageOrigins: [...origins].sort(), ...(events === undefined ? {} : { events }) };
 }
 
 /** The look as plain JSON, for a Worker, which has no config folder: the deploy build bundles it beside the business. */
@@ -82,6 +86,7 @@ export function bundleLook(look: Look): LookBundle {
     theme: look.theme,
     strings: look.strings,
     imageOrigins: look.imageOrigins,
+    ...(look.events === undefined ? {} : { events: look.events }),
     media: Object.fromEntries(
       [...look.media].map(([name, m]) => [name, { type: m.type, base64: Buffer.from(m.body).toString("base64") }]),
     ),

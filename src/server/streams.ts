@@ -8,9 +8,10 @@ import type { EventEmitter } from "node:events";
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Config } from "../core/config.ts";
+import type { Power } from "../core/levels.ts";
 import type { Order } from "../core/orders.ts";
 import { type Audience, viewFor } from "../core/views.ts";
-import type { EventFilter, Role, Session, Store, StoredEvent } from "../store/store.ts";
+import type { EventFilter, Session, Store, StoredEvent } from "../store/store.ts";
 import { ApiError, type Env } from "./errors.ts";
 
 export interface StreamDeps {
@@ -19,7 +20,7 @@ export interface StreamDeps {
   events: EventEmitter;
   now: () => number;
   ownOrder: (c: Context, id: string) => Order;
-  requireRole: (c: Context<Env>, role: Role) => Session;
+  requirePower: (c: Context<Env>, power: Power) => Session;
   heartbeatMs: number;
 }
 
@@ -63,7 +64,7 @@ function eventId(raw: string | undefined, field: string): number | undefined {
   return n;
 }
 
-export function registerStreams(http: Hono<Env>, deps: StreamDeps): void {
+export function registerStreams(http: Hono<Env>, deps: StreamDeps): { open(): number } {
   const { config, store, events } = deps;
   /** Open streams per customer order or staff session. */
   const openStreams = new Map<string, number>();
@@ -71,15 +72,15 @@ export function registerStreams(http: Hono<Env>, deps: StreamDeps): void {
   /** Checks access and returns the audience the path names. */
   function audienceOf(c: Context<Env>, kind: string): Audience {
     if (kind === "counter") {
-      deps.requireRole(c, "staff");
+      deps.requirePower(c, "orders.view");
       return { kind: "counter" };
     }
     if (kind === "owner") {
-      deps.requireRole(c, "owner");
+      deps.requirePower(c, "reports");
       return { kind: "owner" };
     }
     if (kind === "station") {
-      deps.requireRole(c, "staff");
+      deps.requirePower(c, "orders.view");
       const stationId = c.req.param("id") ?? "";
       if (!config.stations.some((s) => s.id === stationId)) {
         throw new ApiError(404, "no_such_station", `expected a station from stations.json, found ${stationId}`);
@@ -183,4 +184,5 @@ export function registerStreams(http: Hono<Env>, deps: StreamDeps): void {
   http.get("/api/stream/:kind/:id", (c) => stream(c, c.req.param("kind")));
   http.get("/api/poll/:kind", (c) => poll(c, c.req.param("kind")));
   http.get("/api/poll/:kind/:id", (c) => poll(c, c.req.param("kind")));
+  return { open: () => [...openStreams.values()].reduce((a, b) => a + b, 0) };
 }

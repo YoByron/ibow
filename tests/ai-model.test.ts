@@ -144,6 +144,23 @@ describe("the Chat Completions adapter", () => {
     expect(req?.raw).not.toContain(KEY);
   });
 
+  test("images go as OpenAI-compatible content parts after the text, as data URLs", async () => {
+    fake.seen.length = 0;
+    fake.reply = () => chat("{}");
+    const png = "data:image/png;base64,iVBORw0KGgo=";
+    await model().complete({ system: "Read it.", user: "Page 1", images: [png], maxTokens: 50 });
+    expect(fake.seen[0]?.body.messages).toEqual([
+      { role: "system", content: "Read it." },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Page 1" },
+          { type: "image_url", image_url: { url: png } },
+        ],
+      },
+    ]);
+  });
+
   test("without a key no authorization header is sent", async () => {
     fake.seen.length = 0;
     fake.reply = () => chat("ok");

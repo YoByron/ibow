@@ -39,11 +39,14 @@ export function wholeNumber(value: unknown, field: string): number {
 }
 
 export function method(value: unknown, field: string): PaymentMethod {
-  if (value !== "upi" && value !== "cash") throw new InputError(field, '"upi" or "cash"', value);
+  if (value !== "upi" && value !== "cash" && value !== "card") {
+    throw new InputError(field, '"cash", "upi" or "card"', value);
+  }
   return value;
 }
 
 const MAX_LINES = 50;
+const MAX_EXTRAS = 30;
 /** A station's "all ready" covers every open line it has, so it may name more lines than one order holds. */
 const MAX_LINE_REFS = 500;
 
@@ -68,6 +71,17 @@ export function lines(value: unknown, field = "lines"): LineRequest[] {
     const o = object(raw, f);
     const line: LineRequest = { itemId: text(o.itemId, `${f}.itemId`, 100), qty: wholeNumber(o.qty, `${f}.qty`) };
     if (o.size !== undefined) line.size = text(o.size, `${f}.size`, 100);
+    if (o.extras !== undefined) {
+      if (!Array.isArray(o.extras) || o.extras.length > MAX_EXTRAS) {
+        throw new InputError(`${f}.extras`, `an array of at most ${MAX_EXTRAS} option ids`, o.extras);
+      }
+      line.extras = o.extras.map((e, j) => text(e, `${f}.extras[${j}]`, 100));
+    }
+    // Length and content of a note are the order rules' to judge (bad_note), so a long one gets its own clear error.
+    if (o.note !== undefined) {
+      if (typeof o.note !== "string") throw new InputError(`${f}.note`, "a string", o.note);
+      line.note = o.note.slice(0, 400);
+    }
     return line;
   });
 }

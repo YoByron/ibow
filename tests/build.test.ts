@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { type BuiltFile, buildClient } from "../scripts/build-client.ts";
+import { type BuiltFile, buildClient, stampAssets } from "../scripts/build-client.ts";
 import { DEFAULT_THEME, themeCss } from "../src/core/theme.ts";
 
 const out = mkdtempSync(join(tmpdir(), "ibow-build-"));
@@ -20,6 +20,19 @@ const precache = (worker: string) => {
 };
 
 describe("client build", () => {
+  test("every page names its scripts and sheets with the build, so a cache in front can't mix two builds", () => {
+    const build = readFileSync(join(out, "build.txt"), "utf8").trim();
+    for (const page of ["index.html", "staff.html", "owner.html", "admin.html"]) {
+      const html = readFileSync(join(out, page), "utf8");
+      const refs = [...html.matchAll(/\s(?:href|src)="(\/[^"]+\.(?:js|css)[^"]*)"/g)].map((m) => m[1] as string);
+      expect(refs.length, page).toBeGreaterThan(2);
+      for (const ref of refs) expect(ref.endsWith(`?b=${build}`), `${page}: ${ref}`).toBe(true);
+    }
+    expect(stampAssets('<link href="/a.css"><script src="/x.js?v=1"></script>', "abc")).toBe(
+      '<link href="/a.css?b=abc"><script src="/x.js?v=1"></script>',
+    );
+  });
+
   test("the storefront's first load stays under 60 KB gzip, fonts and images apart: no staff code or strings in it", () => {
     const sheet = gzipSync(themeCss(DEFAULT_THEME), { level: 9 }).length;
     expect(gzip(["index.html", "app.js", "style.css", "store.css"]) + sheet).toBeLessThanOrEqual(60 * 1024);
@@ -44,7 +57,7 @@ describe("client build", () => {
   test("icons and typefaces are self-hosted in the build", () => {
     const names = files.map((f) => f.name);
     expect(names).toEqual(
-      expect.arrayContaining(["assets/fonts/inter.woff2", "assets/fonts/lora.woff2", "assets/emoji/hot_beverage.png"]),
+      expect.arrayContaining(["assets/fonts/inter.woff2", "assets/fonts/lora.woff2", "assets/fonts/fraunces.woff2"]),
     );
   });
 
@@ -56,6 +69,20 @@ describe("client build", () => {
     expect(readFileSync(join(out, "staff.js"), "utf8")).not.toContain("/api/owner");
     for (const worker of ["sw.js", "staff-sw.js"])
       expect(precache(worker).some((p) => p.startsWith("/owner"))).toBe(false);
+  });
+
+  test("the links hub is its own page and bundle, with no service worker and no other page's code (D-074)", () => {
+    expect(files.map((f) => f.name)).toEqual(expect.arrayContaining(["admin.html", "admin.js", "admin.css"]));
+    const admin = readFileSync(join(out, "admin.js"), "utf8");
+    expect(admin).toContain("/api/hub");
+    expect(admin).toContain("/api/admin/health");
+    expect(admin).not.toContain("/api/owner");
+    for (const name of ["app.js", "staff.js", "owner.js"]) {
+      expect(readFileSync(join(out, name), "utf8"), name).not.toContain("/api/admin/health");
+    }
+    for (const worker of ["sw.js", "staff-sw.js"])
+      expect(precache(worker).some((p) => p.startsWith("/admin"))).toBe(false);
+    expect(readFileSync(join(out, "_headers"), "utf8")).toContain("/admin\n  Content-Security-Policy");
   });
 
   test("the AI analyst is its own bundle: no other page, worker or stylesheet carries it (M7, D-028)", () => {
@@ -82,11 +109,12 @@ describe("client build", () => {
     const sources = [...html.matchAll(/\s(?:src|href)="([^"]+)"/g)].map((m) => m[1] as string);
     for (const ref of sources) {
       expect(ref.startsWith("/") || ref.startsWith("https://") || /^\{\{[A-Z_]+_URL\}\}$/.test(ref), ref).toBe(true);
-      if (ref.startsWith("/") && ref !== "/theme.css")
+      const path = ref.split("?")[0] as string;
+      if (path.startsWith("/") && path !== "/theme.css")
         expect(
           files.map((f) => `/${f.name}`),
           ref,
-        ).toContain(ref);
+        ).toContain(path);
     }
     expect(html).toContain("No warranty");
     // It is not part of the storefront's first load.

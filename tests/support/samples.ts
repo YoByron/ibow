@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { type Config, loadConfig, type RawConfig } from "../../src/core/config.ts";
 
@@ -14,6 +14,7 @@ export function sampleRaw(sample: string): RawConfig {
     business: readSample(sample, "business.json"),
     catalog: readSample(sample, "catalog.json"),
     stations: readSample(sample, "stations.json"),
+    ...(existsSync(`${root}${sample}/spots.json`) ? { spots: readSample(sample, "spots.json") } : {}),
   };
 }
 

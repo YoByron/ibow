@@ -3,6 +3,7 @@
  * so the storefront bundle doesn't carry them. The spoken batch text is the core batch template, not a string here.
  */
 
+import { orderNumber, orderNumbers } from "../core/tokens.ts";
 import { en } from "./strings.ts";
 
 export const staffEn = {
@@ -16,6 +17,31 @@ export const staffEn = {
   badPin: "That ID and PIN don't match.",
   tooManyTries: "Too many tries. Wait a few minutes and try again.",
   chooseScreen: "Choose a screen",
+  counterHint: "Take orders and payments, call orders out",
+  runnerHint: "Carry ready orders to the tables",
+  stationHint: "Make what is ordered here",
+  managerHint: "Switch items, set today's counts, events, refunds",
+  roomsTitle: "Rooms",
+  roomMoveOff: "Not this room",
+  roomMoveTitle: "Take order {token} off {room}'s bill?",
+  roomMoveBody: "It becomes an ordinary order, paid at the counter. Every move is kept with your name.",
+  roomMoveReason: "Why (optional)",
+  roomMoveConfirm: "Take it off the bill",
+  roomsMoved: "Taken off a room bill",
+  roomMovedBy: "{by} at {time} {reason}",
+  roomsHint: "Room bills, settled at checkout",
+  roomsSub: "Each room's open bill; settle it all when the guest checks out",
+  roomsNone: "No room has an open bill.",
+  roomSettleCash: "Cash",
+  roomSettleUpi: "UPI",
+  roomSettleCard: "Card",
+  roomSettleHint: "At checkout, settle {amount} for every order at once:",
+  roomSettleTitle: "Settle {room}?",
+  roomSettleBody: "{amount} received by {method}, for every open order of this room.",
+  roomSettleConfirm: "Settle",
+  roomsSettled: "Settled at checkout",
+  roomSettledBy: "{by} at {time}, {method}",
+  onRoomBill: "On the room bill of {spot}. Settle it in Rooms at checkout.",
   pinClear: "Clear",
   pinDelete: "Delete",
   collectCash: "Collect cash",
@@ -25,6 +51,8 @@ export const staffEn = {
   tickets: "Tickets",
   itemsTotal: "Items",
   startShift: "Tap to start (turns sound on)",
+  startTitle: "Ready for the shift?",
+  startSub: "One tap turns the sound on, so you hear every new order and every call.",
   muteVoice: "Mute",
   speechRate: "Speech speed",
 
@@ -36,6 +64,20 @@ export const staffEn = {
   tabReady: "Ready {n}",
   noOrders: "No orders here.",
   lineQty: "{qty} × {name}",
+  runnerTitle: "Runner",
+  runnerSub: "Orders to carry out",
+  noRunnerOrders: "Nothing waiting to be carried.",
+  deliveredOf: "{n} of {total} delivered",
+  waitingOn: "waiting on {stations}",
+  toCarry: "{n} ready to carry",
+  stateMaking: "Being made",
+  stateReady: "Ready",
+  stateDelivered: "Delivered",
+  deliver: "Delivered",
+  deliverReady: "Carry out all ready",
+  lateBadge: "Late",
+  lateAlertPart: "Order {token} {spot}: part was delivered, the rest is late",
+  lateAlertReady: "Order {token} {spot}: ready and waiting to be carried",
   readyBadge: "Ready",
   waitingBadge: "Waiting",
   servedBadge: "Served",
@@ -46,14 +88,33 @@ export const staffEn = {
   paidLabel: "Paid {amount}",
   cashReceived: "Cash",
   upiReceived: "UPI received",
+  managerTitle: "Menu today",
+  managerSub: "Switch items on or off and set what is left",
+  itemOn: "On",
+  itemOff: "Off",
+  countLabel: "Left today",
+  countNone: "No limit",
+  countLeft: "{n} left",
+  countSet: "Set",
+  cardReceived: "Card received",
+  payCard: "Card received",
+  methodCash: "Cash",
+  methodUpi: "UPI",
+  methodCard: "Card",
+  refundAction: "Refund",
+  refundAmount: "Amount to refund",
+  refundMethod: "Handed back by",
+  refundGive: "Handed back",
+  refundUpTo: "At most {amount}",
+  refundedLine: "Refunded {amount} by {method} ({by})",
   cashGiven: "Cash handed over",
   changeLabel: "Change {amount}",
   shortBy: "Short by {amount}",
   confirmCash: "Cash received: {amount}",
   startPreparing: "Start preparing",
   markDone: "Collected",
-  callToken: "Call token",
-  callText: "Token {token}, your order is ready.",
+  callToken: "Call order",
+  callText: "Order {token}, your order is ready.",
   addItems: "Add items",
   addingTo: "Add to {token}",
   addToOrder: "Add to {token}",
@@ -61,7 +122,7 @@ export const staffEn = {
   undo: "Undo",
   recentlyDone: "Collected in the last 5 minutes",
   newOrderAlert: "New order {token}",
-  readyAlert: "Token {token} is ready",
+  readyAlert: "Order {token} is ready",
   cancel: "Cancel",
   payCash: "Cash",
   payUpi: "UPI QR",
@@ -76,17 +137,17 @@ export const staffEn = {
   oldest: "Oldest",
   oldestAge: "{n}m",
   moreTokens: "+{n}",
-  tokensFor: "Tokens {tokens}",
+  tokensFor: "Orders {tokens}",
   markReady: "Ready",
   undoReady: "Undo ready",
   jobReady: "Job ready",
   noJobs: "No jobs waiting.",
-  newJob: "New job, token {token}: {items}",
+  newJob: "New job, order {token}: {items}",
   printTicket: "Print ticket",
   printAll: "Print tickets",
 
   // Tickets
-  ticketToken: "Token {token}",
+  ticketToken: "Order {token}",
   receiptPaid: "Paid",
   receiptDue: "Due",
 } as const;
@@ -96,6 +157,17 @@ const all: Readonly<Record<string, string>> = { ...en, ...staffEn };
 export type StaffStringKey = keyof typeof en | keyof typeof staffEn;
 
 /** The string for `key` with `{placeholders}` filled; an unknown placeholder stays visible rather than vanishing. */
+/** `{token}` and `{tokens}` in any label read as order numbers ("#47"), never as the stored `25-047` (M13). */
+function readable(vars: Readonly<Record<string, string>>): Readonly<Record<string, string>> {
+  if (vars.token === undefined && vars.tokens === undefined) return vars;
+  return {
+    ...vars,
+    ...(vars.token === undefined ? {} : { token: orderNumber(vars.token) }),
+    ...(vars.tokens === undefined ? {} : { tokens: orderNumbers(vars.tokens) }),
+  };
+}
+
 export function t(key: StaffStringKey, vars: Readonly<Record<string, string>> = {}): string {
+  vars = readable(vars);
   return (all[key] as string).replace(/\{(\w+)\}/g, (whole, name: string) => vars[name] ?? whole);
 }

@@ -43,7 +43,7 @@ function place(store: Store, at: number, qty = 1) {
 }
 
 describe("the report's queries", () => {
-  test("no plan scans orders, order_lines, payments or payment_top_ups: every one is a search", () => {
+  test("no plan scans orders, order_lines, payments, payment_top_ups or payment_refunds: every one is a search", () => {
     const dir = mkdtempSync(join(tmpdir(), "ibow-plan-"));
     dirs.push(dir);
     const path = join(dir, "ibow.db");
@@ -60,6 +60,8 @@ describe("the report's queries", () => {
       minutes: ["2026-11-26"],
       receivedBaseByMinute: ["2026-11-26"],
       receivedTopUpsByMinute: ["2026-11-26"],
+      refundsByMinute: ["2026-11-26"],
+      salesRefunds: [0],
     };
     for (const [name, sql] of Object.entries(REPORT_SQL)) {
       const plan = raw

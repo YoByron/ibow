@@ -1,0 +1,30 @@
+[
+  {
+    "id": "bar",
+    "name": "Barista",
+    "categories": ["coffee"],
+    "speak": true,
+    "print": null
+  },
+  {
+    "id": "smoothies",
+    "name": "Smoothies & Shakes",
+    "categories": ["smoothies"],
+    "speak": true,
+    "print": null
+  },
+  {
+    "id": "kitchen",
+    "name": "Kitchen",
+    "categories": ["mains"],
+    "speak": true,
+    "print": "ticket-80mm"
+  },
+  {
+    "id": "cakes",
+    "name": "Cake Counter",
+    "categories": ["cakes"],
+    "speak": true,
+    "print": null
+  }
+]

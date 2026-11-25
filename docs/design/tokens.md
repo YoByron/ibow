@@ -86,3 +86,27 @@ Awning (lime #a8d24e and white, 26px stripes with scallops), forest header, sun 
 - `screens/assets/emoji/*.png`: Microsoft Fluent Emoji 3D (MIT), licence in `screens/assets/LICENSE-fluent-emoji.txt`.
 - `screens/assets/fonts/inter-*.woff2`: Inter, Latin subset via fontsource (OFL), licence in `screens/assets/LICENSE-inter-OFL.txt`.
 - Regenerate: `node build.mjs && node render.mjs` in this folder.
+
+## Premium layer and app shell (M11, M13; D-070, D-080)
+
+Everything below is set by `theme.json` or the Appearance screen; nothing here needs a code change to restyle a business.
+
+| Token or field | What it does |
+|---|---|
+| `font` → `--font` | Body text. |
+| `display` → `--font-display` | Headings, prices, totals, the order number, the splash name. Fraunces (soft serif) or any bundled face. |
+| `--ic-fill`, `--ic-fo` | The soft fill under a line icon and its opacity (default: the text colour at 14%). Components set it per place: accent at 35-45% on tiles, tabs and dialogs. |
+| `--brand-name`, `--brand-mark` | The business name and image logo, emitted in `/theme.css` for the splash (CSS only, no script). Without an image logo the mark is hidden (`--brand-mark-d:none`). |
+| `features.tiles` | `always` (every item card has a picture) or `photos` (only items with a photo do; others are text cards). |
+| `features.featured` | A "Most loved" strip of photographed items, best sellers first. |
+
+Icons: one line set drawn for ibow (`src/client/ui/icons.ts`), 24 px grid, 1.5 px stroke, round caps and joins, optional
+soft fill. A new icon is a new entry there plus its name in `ICONS` (`src/core/theme.ts`); the test in
+`tests/icons.test.ts` keeps the two in step and the paths on the grid.
+
+Shell components (`src/client/ui/shell.css`, `shell.ts`, `dialog.ts`): the splash (`#splash`, gone once the first screen is
+drawn), `showDialog` for every "can't do that now", the `.notice` banner, `.name-card`, compact `.rail.filters`, and view
+transitions between screens. Motion respects `prefers-reduced-motion`; inputs are at least 16 px so phones never zoom.
+
+Where the look can grow next without code: more bundled faces in `FONTS`, more icon drawings, a header photo
+(`header.style: "image"`), per-category icons (`categoryIcons`), item photos, and words (`strings.<locale>.json`).

@@ -1,6 +1,7 @@
 /* The owner's dashboard only, on top of style.css and staff.css. Tokens only. */
 
 /* all four bundled typefaces, so the Appearance preview can show any of them */
+@font-face{font-family:"ibow-fraunces";src:url(/assets/fonts/fraunces.woff2) format("woff2");font-weight:100 900;font-display:swap}
 @font-face{font-family:"ibow-inter";src:url(/assets/fonts/inter.woff2) format("woff2");font-weight:100 900;font-display:swap}
 @font-face{font-family:"ibow-lora";src:url(/assets/fonts/lora.woff2) format("woff2");font-weight:100 900;font-display:swap}
 @font-face{font-family:"ibow-nunito";src:url(/assets/fonts/nunito.woff2) format("woff2");font-weight:100 900;font-display:swap}
@@ -20,8 +21,8 @@ mark.unbacked{background:var(--warn-soft);color:var(--warn-text);border-radius:4
 .swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(11rem,1fr));gap:var(--sp-3)}
 .swatch{display:flex;align-items:center;gap:var(--sp-2);font-weight:600;font-size:13px}
 .swatch input[type=color]{width:44px;height:44px;padding:0;border:1.5px solid var(--line);border-radius:var(--r-ctl);background:var(--card);cursor:pointer;flex:none}
-.check{display:flex;align-items:center;gap:var(--sp-2);min-height:36px;font-weight:600}
-.check input{width:20px;height:20px;accent-color:var(--primary)}
+.flag-check{display:flex;align-items:center;gap:var(--sp-3);min-height:44px;font-weight:600}
+.flag-check input{width:22px;height:22px;flex:none;accent-color:var(--primary)}
 .appearance .field select{min-height:var(--ctl-h);padding:0 12px;border-radius:var(--r-ctl);border:1.5px solid var(--line);background:var(--card)}
 .contrast-bad{background:var(--warn-soft);border:1.5px solid var(--warn);border-radius:var(--r-panel);padding:var(--sp-3);color:var(--ink)}
 .contrast-bad p{font-weight:700;margin-bottom:var(--sp-2)}
@@ -34,4 +35,15 @@ mark.unbacked{background:var(--warn-soft);color:var(--warn-text);border-radius:4
 .preview .rail{position:static}
 .preview .item{pointer-events:none}
 .preview a{pointer-events:none}
-@media (max-width:900px){.appearance{grid-template-columns:1fr}.preview-col{position:static}.preview{margin:0 auto}}
+@media (max-width:900px){.appearance{grid-template-columns:minmax(0,1fr)}.preview-col{position:static}.preview{margin:0 auto}}
+
+/* Spots: a card per area, a tile per spot */
+.spots-body{display:flex;flex-direction:column;gap:var(--sp-3)}
+.spot-zone header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:var(--sp-3)}
+.spot-zone h3{margin:0}
+.spot-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(9.5rem,1fr));gap:var(--sp-2)}
+.spot-grid a{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border-radius:var(--r-ctl);background:var(--card-2);color:var(--ink);text-decoration:none;min-height:44px}
+.spot-grid a:active{transform:scale(.98)}
+.spot-grid b{font-weight:600}
+.spot-grid li{display:flex;flex-direction:column;gap:4px}
+.spot-grid small{font-size:12px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

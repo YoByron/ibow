@@ -95,9 +95,27 @@ export function assetHeaders(build: string, imageOrigins: readonly string[] = []
   const rule = (path: string, headers: Record<string, string>) =>
     [path, ...Object.entries(headers).map(([k, v]) => `  ${k}: ${v}`)].join("\n");
   const csp = contentSecurityPolicy(imageOrigins);
-  const pages = ["/", "/staff", "/showcase", "/index.html", "/staff.html", "/showcase.html", "/owner.html"];
+  const pages = [
+    "/",
+    "/staff",
+    "/showcase",
+    "/index.html",
+    "/staff.html",
+    "/showcase.html",
+    "/owner.html",
+    "/admin",
+    "/admin.html",
+  ];
   const rules = [rule("/*", fileHeaders(build)), ...pages.map((p) => rule(p, { "Content-Security-Policy": csp }))];
   return `${rules.join("\n\n")}\n`;
+}
+
+/** A page's `href="/x.css"` and `src="/x.js"` as `…?b=<build>`; a reference that already has a query is left alone. */
+export function stampAssets(html: string, build: string): string {
+  return html.replace(
+    /(\s(?:href|src)=")(\/[\w./-]+\.(?:js|css))(")/g,
+    (_, a: string, path: string, z: string) => `${a}${path}?b=${build}${z}`,
+  );
 }
 
 export interface BuildOptions {
@@ -127,6 +145,10 @@ export async function buildClient(target = CLIENT_DIR, opts: BuildOptions = {}):
   // The owner's dashboard: its own script and styles, and no service worker (it is used online, by one person).
   await build({ ...common, entryPoints: [join(src, "owner.ts")], outfile: join(outDir, "owner.js"), format: "iife" });
   await build({ ...common, entryPoints: [join(src, "owner.css")], outfile: join(outDir, "owner.css") });
+  // The links hub, the switches and the health page (D-074 to D-076): one more page, its own script, no service worker.
+  await build({ ...common, entryPoints: [join(src, "admin.ts")], outfile: join(outDir, "admin.js"), format: "iife" });
+  await build({ ...common, entryPoints: [join(src, "admin.css")], outfile: join(outDir, "admin.css") });
+  copyFileSync(join(src, "admin.html"), join(outDir, "admin.html"));
   // The showcase page (D-055): static, styled by the theme tokens, its pictures the approved screenshots in docs/media.
   await build({ ...common, entryPoints: [join(src, "showcase.css")], outfile: join(outDir, "showcase.css") });
   mkdirSync(join(outDir, "showcase"));
@@ -153,6 +175,12 @@ export async function buildClient(target = CLIENT_DIR, opts: BuildOptions = {}):
   const version = hash.digest("hex").slice(0, 12);
   // The server sends this as X-Ibow-Build on every file; the worker caches only responses from its own build.
   writeFileSync(join(outDir, "build.txt"), `${version}\n`);
+  // Every page names its scripts and sheets with the build (`/app.js?b=…`), so a cache in front of the server (Cloudflare's
+  // browser TTL turns our no-cache into four hours) can never pair one build's page with another build's files.
+  for (const page of listFiles(outDir).filter((n) => n.endsWith(".html"))) {
+    const file = join(outDir, page);
+    writeFileSync(file, stampAssets(readFileSync(file, "utf8"), version));
+  }
   // One worker per page, each precaching only its own files: a customer's phone never downloads the staff screens.
   const workers = [
     {

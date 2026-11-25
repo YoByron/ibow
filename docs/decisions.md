@@ -656,3 +656,316 @@
   or makes no commit when nothing changed. It cannot push or fetch. Tests that assume development-only files (the assistant
   folder and its instructions) must hold in the published tree, where they do not exist, so they derive their expectation
   from what is present.
+
+- **D-061 2026-11-24 A demo runs any config folder, across the business's own hours.** `npm run demo -- <path>` and
+  `demo-serve --sample <path>` accept a folder holding `business.json`, `catalog.json`, `stations.json` and `rush.json`
+  besides a bundled sample's name, so a freelancer can show an owner their own menu without adding a sample to the repo
+  (a business's real name never enters it). The seeder places orders only inside `business.hours` (the open part of a
+  partly open hour, with its share of the weight) and takes an optional `hourWeights` from `rush.json` for a business
+  busy at other times than the default morning, lunch and evening peaks. Without hours or a profile, every sample seeds
+  exactly as before.
+
+- **D-062 2026-11-24 A demo asks search engines not to index it.** A demo built from a real business's menu (D-061) must
+  never be listed as that business's ordering page. On a demo install (the throwaway PINs are set) every response the
+  app serves carries `X-Robots-Tag: noindex, nofollow`; on Workers that covers `/`, the API and the other worker-first
+  paths, and static scripts and images, which nobody searches for, go without it. A real install is unchanged.
+
+- **D-063 2026-11-24 Spots: where the customer sits, as config.** An optional `spots.json` lists zones and tables (a count with a
+  prefix, or named spots). A QR per spot opens `/?spot=<id>`; the cart page also offers the list ("where are you sitting?"), and
+  the counter's walk-in panel the same. The order stores the spot's label ("Garden T4") as a snapshot, so a later edit of
+  `spots.json` never rewrites a past order, and every staff screen, ticket and token page shows it. The owner's Spots page prints
+  the QR cards through the 80mm print path. An unknown spot is refused (`bad_spot`) on the API but ignored by the client when
+  its QR is stale. Cost on a 300-order day: one TEXT column on `orders`, no new rows, no new reads. The Worker bundles the file
+  through an `ibow-spots` alias (`[]` when a business has none).
+- **D-064 2026-11-24 Extras are a library of groups named by id; the line's unit price includes them.** Items and categories
+  name groups (`min`, `max`, options with a price, 0 allowed). An option id is unique across the library, so an order names its
+  extras as a flat list of ids and the server finds each one's group; the line stores each extra's name and price as they were,
+  and `unitMinor` already includes them, so every total, report, payment and top-up works on integer minor units unchanged.
+  A batch row is item, size, extras and note, so "2 Latte Oat milk" and "1 Latte" are separate rows and are spoken so.
+  Extras are stored as JSON in one column of `order_lines`: no extra rows (the 300-order rush writes the same rows as before).
+  Variants that were really add-ons ("With egg") move to extras in the business's own config.
+- **D-065 2026-11-24 A note per line: 80 characters, trimmed, shown and spoken everywhere the line is.** Free text for the
+  kitchen. It is part of a batch row's identity, is never sent to a model, and is not personal data by design, but retention
+  does not clear it: a customer who writes a name there keeps it until the order is pruned. Revisit if it matters.
+- **D-066 2026-11-24 An item may name its station; lines carry when they were ready and handed over.** `station` on an item
+  overrides its category's (validated against `stations.json` at load, so a typo stops the boot). Every category still needs a
+  station. `readyAt` and `servedAt` are columns on `order_lines`, set by the same calls that already rewrite the order's lines,
+  so no extra writes. Schema version 14.
+- **D-067 2026-11-24 The runner view, and one "late" number.** `business.lateMinutes` (default 6) decides two things: part of an
+  order was handed over and the rest has not followed within it, and a line standing ready that long without being carried (the
+  cold chai). Late orders sort first, are announced once per order and reason, and are spoken. An order with every line
+  delivered leaves the list even before the counter marks it collected. The owner's dashboard shows today's average and longest
+  ready-to-delivered wait from one aggregate over the day's lines (about 700 rows read on a 300-order day, only when an event
+  changed something since the last read; the insights answer is cached until then).
+- **D-068 2026-11-24 A daily count per item, and a last-order time.** The owner sets how many are left in the morning
+  (`daily_counts`: item, day, remaining; schema 15). Orders spend it inside the order's own transaction, an edit gives units
+  back or takes more, zero switches the item off for new orders, and a count from another day is ignored, so nothing to reset.
+  It is not an inventory system. Cost: a read of the few counted rows per order and per save, a write only for an item whose
+  quantity changed (at most the counted items an order holds). `hours.lastOrder` turns customers away with `409 closed` after
+  it and the storefront header shows the time; staff at the counter can still key an order in, and without it hours stay a label.
+- **D-069 2026-11-24 Diet and allergen filters come from tags, and say so.** `filters` in `catalog.json` map a chip to a tag, to keep
+  (`include`) or drop (`exclude`) items carrying it. An exclude filter cannot know about an untagged item, so the storefront
+  says the filters follow the menu's tags and asks guests to tell staff about any allergy. Not done in M10: card payments and
+  refunds (they touch every report that splits money by method); see the plan.
+- **D-070 2026-11-24 A premium layer on the baseline: drawn line icons, a display face, photos only where there are photos.**
+  The owner judged the 3D emoji icons "childish and generic" and asked for a premium look. (1) The Fluent PNGs are gone; one
+  icon set drawn for ibow (`src/client/ui/icons.ts`: 24 px grid, 1.5 px line, round joins, an optional soft fill) renders as
+  inline SVG built element by element (the strict policy holds), takes the text colour and the theme's tokens, and keeps
+  every old icon name, so configs still validate; five names were added (cake, pancakes, salad, map_pin, sun). It costs
+  about 6 KB gzip in the bundle and removes 58 image requests and 2 MB of PNGs. (2) `display` in the theme names a second
+  bundled face for headings, prices, totals and the token (`--font-display`); Fraunces (OFL, Latin subset, 67 KB, loaded
+  only by themes that name it) joins the fonts. (3) `features.tiles: "photos"` gives a card a picture only when the item
+  has a photo, so a menu with a few real photos reads as an editorial menu, not rows of identical placeholders; the
+  default stays `"always"`. (4) The component layer is quieter: semibold instead of extra-bold, neutral sentence-case tags,
+  hairline cards, the primary colour for the selected pill and tab instead of an accent glow. Every sample keeps its own
+  colours and words; none needed an edit. (5) `features.featured` opens the menu with a "Most loved" strip of the items
+  that have a photo, best sellers first, on the unfiltered menu only; a card shows the item in the menu, where its own Add
+  and choices are, so no second ordering path exists. Off by default.
+- **D-071 2026-11-25 Card is a method staff record; a refund is its own row, netted where it was handed back.** `card` joins
+  cash and UPI (`card: true` in `business.json` shows the button; ibow never touches a card, a person confirms it, as with cash).
+  A refund records amount, method, who and when (`payment_refunds`, schema 16, one row per refund, none for an order without
+  one) and is allowed only on money a person confirmed and only up to what that method took in (`over_refund`). Ordered is
+  unchanged and an order refunded is not "awaiting": only Received falls, by the amount, on the business day and minute the
+  money went back, so a refund made the next day shows on the next day's report as a negative. In memory it is a receipt with a
+  negative amount, so insights, the SQL report, the cash/UPI/card split, the day records and the export all net it the same way
+  (`tests/refunds.test.ts` compares the SQL and in-memory answers). Day records stored before this build have no card figure and
+  read as 0. Cost: an order read does one more indexed lookup by order id (no rows when there is no refund); a refund writes the
+  order's refund rows again (a handful), so a 300-order day with 10 refunds adds about 10 writes and 3 000 empty lookups.
+- **D-073 2026-11-25 Notes are cleared with names; a station's batch shows where each order sits; D-068 stated more exactly.**
+  A line's note is free text and can hold a name ("for Priya"), so retention clears it with names: the same pass overwrites it
+  with spaces of the same byte length and then sets it NULL, in `order_lines` and in every snapshot of the order in `events`
+  (`json_each` rebuilds `$.lines`), on Node and in a Durable Object alike (tests: the trigger-recorded values, the raw file bytes,
+  and the Worker). Cost: three more statements an hour over the hour's rows only (the same bound as names). A batch row carries
+  `spots` by token, a chip shows the spot, and the spoken batch reads "26-001 Garden T4" (no spot, no change). Corrections to
+  D-068: `saveOrder` now reads the day's counts first and the order's stored lines only when some item has a count, so a venue
+  with no counts pays none of the line reads it paid before (about 5 000 rows on a 300-order day); counts are keyed on the
+  calendar day (`dayKey`), so a business open past midnight loses its counts at 00:00 and sets them again. The runner's "late"
+  and the oldest-ticket age read the server's time, learnt from each reply's `Date` header (`serverNow`), not the phone's. Two
+  cart lines that would merge past `maxQtyPerLine` stay two lines.
+- **D-072 2026-11-25 Three levels above the staff screens, one powers table, each with its own PIN.** `src/core/levels.ts` holds
+  the table (powers by level: `staff`, `manager`, `owner`, `admin`); every protected route asks `requirePower`, the hub reads
+  it, and `docs/architecture.md` carries the same table, kept equal by a test. The owner's PIN is as it was (`OWNER_PIN_HASH`).
+  The admin's is `ADMIN_PIN_HASH` (Node `.env`, Cloudflare `wrangler secret put`), made by `npm run hash-pin`; unset, nobody can
+  sign in as admin and the answer is the same `bad_pin`. A manager is a staff member whose role is `manager`, created by the
+  owner; ids `owner` and `admin` are reserved. The admin holds only system powers and no customer or sales route answers it. A
+  manager works every staff screen, switches items and sets counts (`/api/menu/items/:id`, also at its old owner path), and
+  refunds up to `managerRefundLimit` of `business.json` on one order, the order's whole refunded sum counted (`refund_limit`,
+  403); without the field a manager may not refund, the owner always may. Demo mode shows a throwaway PIN for every level
+  (five PINs; `ADMIN_PIN_HASH` is set by `npm run demo` for the child server). Schema: no change for levels (a manager is a
+  `staff.role`, sessions already stored a role). Cost: none per request beyond the table lookup; a login is still one PIN
+  derivation.
+- **D-074 2026-11-25 The links hub is one page at `/admin`, and the server decides what it shows.** `src/core/hub.ts` lists every
+  screen (storefront, screen ordering, counter, each station from `stations.json`, runner, the manager's menu screen, each
+  owner tab, the spots QR sheet only where the config has spots, switches, health), each with a line saying what it is for and
+  a power from the table; `GET /api/hub` returns only the groups the signed-in level may open, and, signed out, the public
+  links with no level, so the page offers the four sign-in choices beside them. Station-only staff are not offered the counter
+  or the runner. A person who chooses "Manager" and signs in with a staff ID that is not a manager is signed out again, not
+  shown a hub of another level. The page is a static asset (`admin.html`, `admin.js`, `admin.css`, no service worker, no code of
+  any other page in its bundle and none of it in theirs); on Cloudflare it runs no Worker code. Cost: one small JSON request
+  per visit; no polling except the health view's 30-second refresh while it is open.
+- **D-075 2026-11-25 Feature flags: the look's by the owner, the system's by the admin, stored in the install and audited.**
+  Look flags are the theme's `features` (named `features.<name>`): the owner flips them on the hub or in Appearance, both
+  through the same override row (`theme_override`), so there is one source of truth; system flags are `ai`, `retentionDays`
+  and `showcase` (`flags` table, schema 17), flipped by the admin. Every change writes who, when, level, from and to to
+  `flag_audit` (an Appearance save writes one row per feature it changed, a reset too); no change, no row. The theme's `version`
+  now hashes the features, header, logo and icons as well as the CSS, so an open storefront's 30-second check (and the check
+  when it comes back into view) sees a flipped switch and redraws without a reload. System flags are held in memory (the
+  single writer) and loaded once. Effects: `retentionDays` applies at the next hourly pass and to the owner's repeat-customer
+  window; `ai` can switch an analyst that is set up off (`ai_off`, 409; the panel asks `/api/owner/ai` and hides itself) and
+  never one on where no model is set up; `showcase` is read per request (on Cloudflare, the Worker asks the object at most
+  every 30 s). Cost: a flip is one flag row and one audit row; no per-request reads; `GET /api/flags` reads the audit
+  (bounded to 200 rows).
+- **D-076 2026-11-25 Telemetry for the admin: counted in memory, one row per hour, kept on the install.** Per request the
+  middleware adds to a few counters (requests, 5xx answers, per route a count, total and worst time, keyed by the route's
+  pattern, never the path); they are written to `telemetry_hours` (schema 18, one row per UTC hour, 7 days kept, 20 routes per
+  hour) at most every 30 s while requests come in and with the hourly pass, so a 300-order day of about 3 600 requests over 12
+  busy hours writes at most about 1 440 upserts, about 1 to 3% of the free plan's 100 000 rows, and a quiet install writes
+  none (`tests/telemetry.test.ts`). Rows written come from the driver (a Durable Object reports them, indexes included; on Node
+  they are rows changed, a lower bound), counted per flush and summed from 00:00 UTC. Also shown: open live streams (from the
+  streams module), database size (`databaseSize` in a Durable Object, page count by page size on Node), build, uptime, and the
+  last backup: the newest file in `BACKUP_DIR` on Node, else the time of the last export, else unknown. Nothing is sent
+  anywhere. Eviction of a Durable Object can lose up to half a minute of counts. On Workers, `Date.now()` stands still during
+  synchronous work, so route times there measure waiting, not CPU. The verdict is one line: more than 2% of 50 or more
+  requests ending in an error, 80% of the day's free rows, or 80% of the free storage.
+
+- **D-080 2026-11-25 An app shell, order numbers and the name first (M13).** (1) Every page opens on a splash drawn by CSS
+  alone from `/theme.css` (`--brand-name`, `--brand-mark`; the policy allows no inline script or style), and hands over to
+  the first screen once `#app` holds one (`watchBoot`, at least 650 ms, at most 6 s). Screens inside a page change in a
+  view transition where the browser has them; cross-document view transitions are off, since after a back navigation and a
+  reload they left the page stuck mid-transition. The shell adds safe areas, no rubber-band scroll, no text selection on
+  controls and 16 px inputs (no zoom on focus). (2) Every "can't do that now" is a native `<dialog>` (focus held, Escape
+  closes): ordering paused (closed, or past the last-order time; the server's own rule), an item gone, offline. The menu
+  also shows a slim banner while ordering is paused and says "Last orders taken" in its header, not "Open now". (3) People
+  read and hear an order number, `#47`, never the stored `25-047`: every label's `{token}` is shown through `orderNumber`,
+  lookup accepts the number alone (`tokenForNumber`, today's order), and the data keeps the day. (4) The cart asks
+  "What's your name?" first, still optional (principle 7), and the order page shows the name large under the number.
+
+- **D-081 2026-11-25 Pages name their scripts and sheets with the build.** `buildClient` stamps every `href="/x.css"` and
+  `src="/x.js"` of the built pages as `?b=<build>`. A cache in front of the server that ignores `no-cache` (Cloudflare's
+  default Browser Cache TTL makes it four hours) can then never pair one build's page with another build's files. Both
+  servers look files up by path, so the stamp costs nothing; the service worker keys its cache by path too, and only the
+  live-theme swap's `?v=` (not `?b=`) sends `/theme.css` to the network.
+
+- **D-082 2026-11-25 The room bill: an order a guest puts on their room stays unpaid until staff settle the room.** A zone in
+  `spots.json` may be `"kind": "room"` (default `table`); its spots are rooms, and its QR opens the storefront with that room
+  set like any spot. An order from a room's spot may carry `pay: "room"` (else `400 bad_room`); it stores `roomBill: {room}`
+  (the spot id, column `orders.room`) and its payment stays `unpaid`, so it counts in Ordered, under Open room bills (not Awaiting confirmation: nothing waits on a confirm) and
+  never in Received (principle 6). While open, the counter's confirm and the guest's claim are refused (`409 room_bill`): the
+  money is taken once, at checkout, in Rooms. `POST /api/rooms/:room/settle {method, amountMinor}` confirms every open
+  room-bill order of that room, each for its own total, by the person signed in, at that moment, and writes one
+  `room_settlements` row (who, level, when, method, amount, the order ids), in one transaction. `amountMinor` must equal the
+  open total the screen showed, else `409 room_changed` and nothing changes, so a guest is never charged for an order that
+  arrived while they stood at the desk; all or nothing, no partial settlement. Received then moves on the settle day by the
+  method chosen, through the existing per-payment SQL, with no new report query. A refund after checkout is an ordinary
+  refund. Who may settle is the counter's power (`orders.run`, station-only staff refused). A guest at a room's spot who
+  doesn't stay just pays the usual way; without a room zone nothing changes. Cost on a 300-order day: no new reads or writes
+  for orders not on a room bill; a room order writes the same rows as any order; open room bills are found through a partial
+  index (`orders_room_open`) holding only unsettled room orders, so the owner's figure and the Rooms list read those few
+  orders; a settlement writes one audit row plus the payment and event rows its orders would write at the counter anyway
+  (schema 19).
+  **Only the room's own QR can charge it.** Threat (review, 2026-11-25): the server checked only that the spot was a room,
+  and the cart's picker listed every room, so any guest could put an order on someone else's bill. Fix: each room's QR
+  carries a key (`/?spot=rooms-3&key=…`), an HMAC-SHA256 of the spot id under a 32-byte secret made once per install and
+  kept in `meta.room_key_secret` (no table of keys; 22 base64url characters, 132 bits, compared in constant time).
+  `pay: "room"` needs `roomKey` to match, else `403 room_key` naming the room and saying to scan its QR or pay the usual
+  way; nothing is stored, and the same guest can still order and pay at the counter. Staff who may run orders
+  (`orders.run`, not station-only staff) may key a room's order in without it. The owner reads the keyed links at
+  `GET /api/rooms/keys` (`look.edit`) for the Spots page and its print; a reprint gives the same codes, a new install new
+  ones. The cart's picker lists a room only to the guest who opened that room's QR, and offers the room bill only with its
+  key. A demo publishes its rooms' keys in `GET /api/demo` (`roomKeys`, demo installs only), and the storefront, opened
+  on a room without a key, asks for it there once, so a plain `/?spot=rooms-1` link (a proposal page's) opens the room on a
+  demo and never on a real install. Cost: one HMAC per room-bill order, no rows.
+  **A key is a bearer token, so the owner can replace one (release review, 2026-11-25).** Limit: a key never expires by
+  itself, and a guest who checked out keeps a photo of the QR, so until the owner acts that photo can still charge the room.
+  "New QR" on the owner's Spots page (`POST /api/rooms/:room/new-key`, `look.edit`, after a confirm) bumps that room's key
+  number (`meta.room_key_number:<room>`, absent means 0); the key is the HMAC of `room:<id>:<number>` (`room:<id>` at 0, so
+  QRs printed before rotation existed still work), the old key is refused at once with `403 room_key`, and every other room
+  keeps its own. The owner prints the new card and replaces the old one; doing it at each checkout is the owner's call,
+  not automatic. A key is checked for its shape (`^[A-Za-z0-9_-]{22}$`) before the constant-time compare, which compares
+  bytes, so an odd key is a 403, never a 500. The storefront keeps the key in the tab's session storage for its room and
+  removes it from the address bar (`history.replaceState`), so a link the guest shares does not pass it on. Cost: one `meta`
+  row read per key check and per room listed on Spots (6 for six rooms), one row written per press; nothing on a 300-order
+  day that has no room orders.
+  **A wrong order can leave the bill.** `POST /api/orders/:id/off-room {reason?}` (`orders.run`) takes an order open on a
+  room bill off it: it becomes an ordinary unpaid order, paid at the counter like any other, and one `room_bill_moves`
+  row keeps who, level, when, which order, from which room and why (optional, 120 characters), in the same transaction
+  (schema 21). Rooms lists the moves beside the settlements. An order settled, paid or never on a bill answers
+  `409 not_on_room_bill`.
+
+- **D-083 2026-11-25 Rooms is a staff screen with the counter's power.** `/staff#/rooms` lists each room with open room-bill
+  orders (order number, name if given, time, amount) and its total, with one button per method the business takes (cash;
+  UPI with `UPI_VPA`; card with `"card": true`) that settles the room for exactly that total. Below it, the latest 20
+  settlements: room, who, when, method, amount. It opens for whoever may work the counter (`orders.run`: counter and all
+  staff, a manager, the owner), never station-only staff, and only when `spots.json` has a room zone; the links hub lists
+  it under staff on the same terms. The counter shows a room-bill order as "On the room bill" with no payment buttons. The
+  screen reads `/api/rooms` when opened, after each settle or move, and when the counter stream it follows brings an event
+  about a room-bill order or an order on screen: no polling. Cost (corrected in review): as first built it re-read on every
+  counter event, about 1 500 reads of `/api/rooms` on a 300-order day (some 5 events per order) for each open Rooms screen,
+  each reading the open room orders (about 6 rows each) and 40 audit rows, so some 150 000 rows read a day, 3% of the free
+  plan's 5 million. Redrawing only for room-bill events brings it to the room orders' own events: with 20 room orders a day,
+  about 100 re-reads of some 100 rows, 10 000 rows a day per open screen. Nothing per request elsewhere.
+
+- **D-084 2026-11-25 Events live in the store, held in memory, public only for guests.** An event is a title (60), a date,
+  a start time, an optional end time (before the start means the next morning, so a late night runs 21:00 to 01:00 and is
+  "on now" until then; equal to the start is refused), a one-line note (120), an optional entry price in minor units (shown to guests; no
+  booking or tickets), who sees it (`all`: guests and staff; `staff`) and an "expect a rush" flag; it is one day, or
+  repeats weekly on one or more weekdays from its date up to an optional end date. Owners and managers manage them
+  (`events.manage`) on the owner's Events tab and the manager's screen; `events.json` in the config folder (the same
+  fields, checked at boot, bundled with the look for a Worker) seeds the calendar once (`meta.events_seeded`), so an event
+  deleted later never returns. `GET /api/events` answers the next occurrence of each event in the coming 7 days, soonest
+  first: guest events to anyone, every event to any signed-in session; `GET /api/events/all` and the writes need the
+  power. Events are deleted 2 days after a one-off's day or a repeat's end date, checked once per business day on read; an
+  open-ended repeat stays; at most 100 are kept (`409 too_many_events`). The single writer (D-031) holds them in memory,
+  loaded once at boot, so a page asking for its banner costs no row read: on a 300-order day of about 3 600 requests the
+  calendar adds no reads, a handful of writes when someone edits, and one delete a day at most (schema 20, one JSON row
+  per event).
+
+- **D-086 2026-11-25 The demo's day keeps going, with rooms and events.** Each seeded day's order times and baskets now come
+  from a random stream of that day alone, so the same day always gets the same orders; the seed records how far it placed
+  them (`meta.demo_seeded_until`). `topUpDemo` places what a fresh seed would have placed since then, day by day up to the
+  clock (at most 8 days back), and is run when a kept demo starts (`demo-serve`, which reuses its database) and every hour
+  (the Node server on a demo database with a `rush.json` beside its config, and the Worker's hourly alarm on a demo bundle).
+  That fixes a kept demo's next day opening on "2 orders, down 85% on yesterday": a fresh `npm run demo` already seeded
+  today up to the clock, along `hourWeights` and inside the opening hours. With a room zone, 4 of today's collected orders
+  (yesterday's before today has enough) are delivered to rooms 1 to 3 and left on their bills. The sample's `rush.json`
+  carries `events` relative to the demo's day (`inDays`; today's without a `start` begins two hours on), written by the
+  rush generator from `SAMPLE_RUSHES`; café orders in a generated rush sit only at tables. The garden cafe has 6 rooms, a
+  rush-flagged guest event today, a weekly Sunday one with an entry price and a staff-only delivery in 3 days, all
+  invented. Cost: a top-up on a 300-order sample writes about an hour of orders per hour, what a real day would; the
+  Worker's demo at its 0.22 scale stays a few hundred rows an hour, far under the free plan's 100 000 a day.
+
+- **D-085 2026-11-25 Event banners are one client module over the shell, drawn by tokens.** `src/client/events.ts` reads
+  `/api/events` once per page and builds every banner from one function: on the splash of the staff, owner and hub pages
+  (`showSplashEvent`, which keeps the splash up 2 s from the page's start so it can be read, and lets it go at once when
+  there is no event; `holdSplash` in `ui/shell.ts`), as a card at the top of the staff chooser, the manager's screen, the
+  owner's Today and the hub, as a slim banner under the storefront's header that a guest can hide for that occurrence (kept
+  on the phone), and as one line on the order page. It shows the title, when ("In 2 days · Sat 10:00", "Tomorrow · 10:00",
+  "Today · starts in 2 h 15 min", "Today · on now"), the note and the price, "Expect a rush" for staff, and "Weekly" for a
+  repeat. On its day the banner celebrates: a confetti burst of 14 `<i>` drawn and placed by `ui/events.css` alone (theme
+  tokens, `nth-child` positions, no inline style, nothing at all under `prefers-reduced-motion`) and a countdown that moves
+  every 30 s from the server's clock. Every word is a key in `src/core/labels.ts`, so `strings.<locale>.json` can change
+  it; the editor's labels are their own table (`events-strings.ts`). Cost: one cached request per page load; the storefront
+  grows by about 2 KB gzip.
+
+- **D-090 2026-11-25 Closed days in the opening hours.** `hours.closedDays` lists whole weekdays a business is shut
+  (`"mon"` to `"sun"`, business-local; all seven is refused as a mistake). On such a day the storefront and the server
+  take no orders, exactly like the time past `lastOrder`, and the closed dialog names the next open day
+  ("We open again Tuesday at 09:00") in the customer's language. Many small businesses close one day a week, and a
+  storefront that cheerfully takes Monday's orders for a shut kitchen is worse than none. Cost: one weekday lookup per
+  order placed and per page render; no rows.
+- **D-091 2026-11-25 A model request may carry images, as data URLs in content parts (M15).** `ChatRequest.images` is a
+  list of `data:image/...;base64,` URLs. The Chat Completions adapter sends the user message as
+  `[{type: "text"}, {type: "image_url", image_url: {url}}...]`, the OpenAI-compatible form that hosted vision models and
+  local servers (Ollama, llama.cpp, vLLM) accept; without images it is the plain string it always was, so the analyst's
+  requests are byte for byte unchanged. Data URLs, not hosted links, because nothing is uploaded anywhere and a local
+  model can read them. Still no vendor SDK and no model name in code; a model that can't see images refuses the call
+  and the importer says so.
+- **D-092 2026-11-25 Menu import: the model reads the menu, code builds the catalog (M15).** `npm run import-menu` sends
+  each page or piece of a menu to the model (`src/ai/menu-reader.ts`) and asks for one JSON shape: sections, items (name,
+  a price or prices per size, a printed description, tags from a short known list, a diet marker, add-on groups by name,
+  `unsure`) and add-on groups with option prices. Reading a photo or a messy page is judgement, which is the model's job
+  (Principle 1). Everything after the reply is code (`src/import/catalog.ts`): the JSON is found and checked, prices become
+  integer minor units by decimal arithmetic on the digits (half up, so 20.555 is 2056 paise, not float's 2055), ids are made,
+  pages merged, add-ons mapped to extras, and the result goes through `parseCatalog`, so a written file always loads. An item
+  without a usable price is left out of the file and listed, never given a placeholder price someone might switch on. A price
+  printed as text loses a currency word or symbol (with its dot) before or after the number ("Rs. 120", "INR 120", "₹120",
+  "120/-"); what is left must be one number, so a range, a deal or a minus sign ("10-12", "2 for 5", "-5") is odd, never
+  merged into 1012 or 25, and the item is left out and listed (corrected in release review). An item the model marked
+  `unsure` is written with `available: false`, so nobody can order a misread name or price before a person switches it on,
+  and the list says so (corrected in release review). An unknown
+  tag is kept and listed; an unknown diet marker is dropped and listed. The command exits 1 only when no model is set (or it is
+  half-set), a model call fails (nothing is written), or no item with a price came back; an unreadable reply for one part is
+  listed and skipped. It uses the analyst's settings (`AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY`, `AI_ADAPTER`), waits 120 s per
+  call unless `AI_TIMEOUT_SECONDS` is set, never names a model, and never replaces an existing file without `--force`. A menu
+  holds nothing personal, and the model is told "part 2 of 3", never a path. It is a developer command, not a screen: an install
+  without AI never loads it.
+- **D-093 2026-11-25 A PDF is refused; export its pages as images.** Text in a PDF sits in compressed content streams drawn with
+  fonts whose codes map to letters only through each font's encoding or ToUnicode table; reading that honestly is a PDF library
+  (pdf.js is megabytes), and a scanned menu PDF has no text at all. Every PDF viewer exports pages as images in one step, and
+  a page image is what a vision model reads best, so the importer refuses a `.pdf` before any call and says exactly that. No new
+  dependency. Revisit if owners hit it often: a page renderer is the step, not a text extractor.
+- **D-094 2026-11-25 Imported ids are stable slugs; pages merge by name.** A category's id is its name as a slug (accents
+  dropped); a section with the same slug on a later page or part is the same category, items appended in reading order. An item
+  with the same slug in the same section is one item: the first price is kept, later description, diet and tags fill gaps, and
+  the duplicate is listed with both prices when they differ. The same name in another section is kept, with the section's id in
+  front (`kids-lemonade`), and listed. Names with no Latin letters get `section-<n>` and `<category>-item` ids. Add-on groups
+  become the `extras` library (D-064): a group's id is its slug, an option's id is its slug unless another group took it (then
+  `<group>-<option>`), `min`/`max` from the reply when valid (else 0 and all options); a group goes on the categories it names
+  and on the items that name it, and one offered nowhere stays in the library and is listed. A price over 50 times the menu's
+  middle price (with 5 or more items) is listed as a likely misread decimal point. The same input gives the same file.
+- **D-095 2026-11-25 Big menus are split under a token budget; one call per photo.** A photo is one call (one page). Text is cut
+  at blank lines (whole lines when a paragraph is longer, hard cuts for a longer line) into parts of at most 8,000 characters,
+  about 2,000 tokens: a menu line becomes about three times as many tokens of JSON, and a reply is capped at 8,192 tokens and
+  64 KB (D-026). Cost: calls = photos + the sum over text files of ceil(characters / 8,000) at most, in order, one at a time; a
+  four-page photographed menu is 4 calls, a 30 KB menu page saved as HTML (about 12 KB of text once stripped) is 2. The
+  command prints the number of calls it made. A busy model (429, 5xx, a timeout or no answer) is asked again after 5, 15 and 30 s, at most three extra calls per piece; any other refusal fails at once. A shared proxy that is out of capacity for a minute then costs a wait, not the pages already read (found on the first real run).
+
+
+- **D-087 2026-11-25 A staff record named `admin` is renamed by a setting, on Node and on a Worker alike.** Since D-072 the
+  id `admin` is the system admin's sign-in, so a staff member saved under it earlier stops the boot. The message now names
+  the fix: set `RENAME_ADMIN_STAFF=<new id>` (`.env` on Node; `npx wrangler secret put RENAME_ADMIN_STAFF` on Cloudflare,
+  where a Durable Object's SQL can't be reached from outside) and start again, or on Node run the one `UPDATE staff` it
+  prints. At start the setting renames the record once (an id like any staff id, free, not `admin` or `owner`, else the
+  boot stops naming the setting) and ends that person's sessions; set again later it does nothing. Cost: one staff read at
+  start, as before.
+

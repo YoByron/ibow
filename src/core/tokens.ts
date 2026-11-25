@@ -41,3 +41,32 @@ export function nextToken(
   const value = counter !== null && counter.day === day ? counter.value + 1 : 1;
   return { token: `${day.slice(8, 10)}-${String(value).padStart(3, "0")}`, counter: { day, value } };
 }
+
+/**
+ * What a person reads and hears: the order number, `#47` for the token `25-047` (M13). The day stays in the token,
+ * which keeps it unique across days; people only ever deal with today's orders, where the number alone is unique.
+ * Anything that isn't a `DD-NNN` token is returned as it is.
+ */
+export function orderNumber(token: string): string {
+  const m = /^\d{2}-(\d{3,})$/.exec(token);
+  return m ? `#${Number(m[1])}` : token;
+}
+
+/** Every `DD-NNN` token inside `text` as its order number (for lists such as "25-001, 25-002"). */
+export function orderNumbers(text: string): string {
+  return text.replace(/\b\d{2}-(\d{3,})\b/g, (_, n: string) => `#${Number(n)}`);
+}
+
+/**
+ * The token a person typed, on business day `day` (YYYY-MM-DD): a full `DD-NNN` stays as it is; a bare order number such
+ * as `47` or `#47` becomes that day's token, `25-047`. Undefined for anything else.
+ */
+export function tokenForNumber(input: string, day: string): string | undefined {
+  const text = input.trim();
+  if (/^\d{2}-\d{3,}$/.test(text)) return text;
+  const m = /^#?(\d{1,5})$/.exec(text);
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  if (!Number.isSafeInteger(n) || n < 1) return undefined;
+  return `${day.slice(8, 10)}-${String(n).padStart(3, "0")}`;
+}

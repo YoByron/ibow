@@ -26,5 +26,9 @@ export interface SqlDriver {
   isDemo(): boolean;
   /** After retention cleared rows: flushes old page images where the engine allows it. */
   afterForget(): void;
+  /** The database's size in bytes, as the engine reports it. */
+  size(): number;
+  /** Rows this connection has written since it opened (the free plan counts them per day); a lower bound where the engine can't say. */
+  rowsWritten(): number;
   close(): void;
 }

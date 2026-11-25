@@ -6,7 +6,7 @@
 
 import { ConfigError } from "./config.ts";
 
-/** The bundled 3D icon set (Fluent Emoji, MIT): one PNG per name in `src/client/assets/emoji`. */
+/** The bundled icon set, drawn for ibow as line icons (`src/client/ui/icons.ts`), coloured by the theme (D-070). */
 export const ICONS: readonly string[] = [
   "bank",
   "bar_chart",
@@ -20,6 +20,7 @@ export const ICONS: readonly string[] = [
   "chequered_flag",
   "clipboard",
   "cocktail_glass",
+  "cake",
   "cooking",
   "counterclockwise_arrows_button",
   "credit_card",
@@ -42,14 +43,17 @@ export const ICONS: readonly string[] = [
   "leaf_fluttering_in_wind",
   "lemon",
   "locked",
+  "map_pin",
   "magnifying_glass_tilted_left",
   "megaphone",
   "mobile_phone",
   "money_bag",
+  "pancakes",
   "party_popper",
   "peach",
   "pot_of_food",
   "receipt",
+  "salad",
   "sandwich",
   "shopping_cart",
   "spaghetti",
@@ -58,6 +62,7 @@ export const ICONS: readonly string[] = [
   "star",
   "steaming_bowl",
   "stopwatch",
+  "sun",
   "takeout_box",
   "teacup_without_handle",
   "teapot",
@@ -69,7 +74,7 @@ export const ICONS: readonly string[] = [
 ];
 
 /** Bundled typefaces (all open licences, Latin subset, one variable file each) or the device's own. */
-export const FONTS = ["inter", "lora", "nunito", "space-grotesk", "system"] as const;
+export const FONTS = ["inter", "fraunces", "lora", "nunito", "space-grotesk", "system"] as const;
 export type FontId = (typeof FONTS)[number];
 export const RADII = ["sharp", "soft", "round"] as const;
 export type Radius = (typeof RADII)[number];
@@ -78,6 +83,9 @@ export type Density = (typeof DENSITIES)[number];
 export const HEADER_STYLES = ["awning", "plain", "image"] as const;
 export type HeaderStyle = (typeof HEADER_STYLES)[number];
 export const TAG_MODES = ["off", "catalog", "auto"] as const;
+/** `always`: every item card has a picture (its photo, else a tinted tile with its icon). `photos`: only items with a photo do. */
+export const TILE_MODES = ["always", "photos"] as const;
+export type TileMode = (typeof TILE_MODES)[number];
 export type TagMode = (typeof TAG_MODES)[number];
 
 /** An icon from the bundled set, or an image: a file in the config folder or an https URL. */
@@ -92,6 +100,8 @@ export interface Theme {
     dark: { surface: string; text: string };
   };
   font: FontId;
+  /** The face of headings, prices, the business name and the token; the body font when absent. */
+  display?: FontId;
   radius: Radius;
   density: Density;
   header: { style: HeaderStyle; awning: [string, string]; image?: string };
@@ -104,6 +114,9 @@ export interface Theme {
     veg: boolean;
     darkToggle: boolean;
     cartEta: boolean;
+    tiles: TileMode;
+    /** A "Most loved" strip at the top of the menu: the items with a photo, best sellers first. */
+    featured: boolean;
   };
 }
 
@@ -120,7 +133,16 @@ export const DEFAULT_THEME: Theme = {
   density: "comfortable",
   header: { style: "awning", awning: ["#a8d24e", "#ffffff"] },
   categoryIcons: {},
-  features: { favourites: true, recent: true, tags: "auto", veg: true, darkToggle: true, cartEta: true },
+  features: {
+    favourites: true,
+    recent: true,
+    tags: "auto",
+    veg: true,
+    darkToggle: true,
+    cartEta: true,
+    tiles: "always",
+    featured: false,
+  },
 };
 
 const FILE_REF = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(png|jpg|jpeg|webp|svg)$/;
@@ -201,7 +223,17 @@ export function themeImages(theme: Theme): string[] {
  * typo can't silently do nothing. Names the file, the field path, what was expected and what was found.
  */
 export function parseTheme(raw: unknown, file = "theme.json"): Theme {
-  const o = obj(file, raw, "", ["colors", "font", "radius", "density", "header", "logo", "categoryIcons", "features"]);
+  const o = obj(file, raw, "", [
+    "colors",
+    "font",
+    "display",
+    "radius",
+    "density",
+    "header",
+    "logo",
+    "categoryIcons",
+    "features",
+  ]);
   const d = DEFAULT_THEME;
   const theme: Theme = {
     colors: structuredClone(d.colors),
@@ -226,6 +258,7 @@ export function parseTheme(raw: unknown, file = "theme.json"): Theme {
     }
   }
   if (o.font !== undefined) theme.font = pick(file, o.font, "font", FONTS);
+  if (o.display !== undefined) theme.display = pick(file, o.display, "display", FONTS);
   if (o.radius !== undefined) theme.radius = pick(file, o.radius, "radius", RADII);
   if (o.density !== undefined) theme.density = pick(file, o.density, "density", DENSITIES);
   if (o.header !== undefined) {
@@ -252,10 +285,11 @@ export function parseTheme(raw: unknown, file = "theme.json"): Theme {
   }
   if (o.features !== undefined) {
     const f = obj(file, o.features, "features", Object.keys(theme.features));
-    for (const k of ["favourites", "recent", "veg", "darkToggle", "cartEta"] as const) {
+    for (const k of ["favourites", "recent", "veg", "darkToggle", "cartEta", "featured"] as const) {
       if (f[k] !== undefined) theme.features[k] = bool(file, f[k], `features.${k}`);
     }
     if (f.tags !== undefined) theme.features.tags = pick(file, f.tags, "features.tags", TAG_MODES);
+    if (f.tiles !== undefined) theme.features.tiles = pick(file, f.tiles, "features.tiles", TILE_MODES);
   }
   return theme;
 }
@@ -437,7 +471,7 @@ const SERIF = 'Georgia, "Times New Roman", serif';
 
 export function fontStack(font: FontId): string {
   if (font === "system") return SANS;
-  return `"ibow-${font}", ${font === "lora" ? SERIF : SANS}`;
+  return `"ibow-${font}", ${font === "lora" || font === "fraunces" ? SERIF : SANS}`;
 }
 
 /** The custom properties of one mode (light or dark), derived from the theme. */
@@ -503,6 +537,7 @@ export function baseVars(theme: Theme): Record<string, string> {
   const r = RADIUS[theme.radius];
   const vars: Record<string, string> = {
     "--font": fontStack(theme.font),
+    "--font-display": fontStack(theme.display ?? theme.font),
     "--r-pill": r.pill as string,
     "--r-card": r.card as string,
     "--r-panel": r.panel as string,
@@ -535,15 +570,30 @@ export function fontFaces(fonts: readonly FontId[]): string {
     .join("");
 }
 
-/** `/theme.css`: the whole theme as custom properties, light, dark by the system or by `data-theme`, and the font. */
-export function themeCss(theme: Theme, imageUrl: (ref: string) => string = (r) => r): string {
+/** A string as a CSS string literal for `content:` (quotes and backslashes escaped, line breaks as spaces; never markup). */
+export function cssString(text: string): string {
+  return `"${text.replace(/[\\"]/g, (c) => `\\${c}`).replace(/[\n\r\f]/g, " ")}"`;
+}
+
+/**
+ * `/theme.css`: the whole theme as custom properties, light, dark by the system or by `data-theme`, and the font. With
+ * `brand`, also the business's name and image mark (`--brand-name`, `--brand-mark`), which the splash screen draws with
+ * CSS alone, before any script has run (the policy allows no inline script or style).
+ */
+export function themeCss(theme: Theme, imageUrl: (ref: string) => string = (r) => r, brand?: { name: string }): string {
   const dark = decl(themeVars(theme, "dark"));
   const image = theme.header.image === undefined ? "" : `:root{--hdr-image:url("${imageUrl(theme.header.image)}")}`;
+  const mark =
+    theme.logo !== undefined && "image" in theme.logo
+      ? `;--brand-mark:url("${imageUrl(theme.logo.image)}")`
+      : ";--brand-mark-d:none";
+  const named = brand === undefined ? "" : `:root{--brand-name:${cssString(brand.name)}${mark}}`;
   return (
-    fontFaces([theme.font]) +
+    fontFaces([...new Set([theme.font, theme.display ?? theme.font])]) +
     `:root{${decl(baseVars(theme))};${decl(themeVars(theme, "light"))}}` +
     `@media (prefers-color-scheme:dark){:root:not([data-theme=light]){${dark}}}` +
     `:root[data-theme=dark]{${dark}}` +
-    image
+    image +
+    named
   );
 }

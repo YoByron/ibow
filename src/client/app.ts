@@ -5,18 +5,40 @@
  */
 
 import type { CatalogItem, Category } from "../core/config.ts";
-import { isOpenAt } from "../core/hours.ts";
+import { closedDayAt, isOpenAt, nextOpenDay, takesOrdersAt } from "../core/hours.ts";
 import { formatPrice } from "../core/money.ts";
 import type { OrderStatus } from "../core/orders.ts";
 import { TINT_COUNT } from "../core/theme.ts";
+import { orderNumber } from "../core/tokens.ts";
 import type { CustomerOrderView } from "../core/views.ts";
 import { announce, askToNotify, canNotify, primeSound } from "./alerts.ts";
 import { ApiFailure, api } from "./api.ts";
-import { addOne, type Cart, cartFromLines, cartTotal, itemCount, qtyOf, setQty } from "./cart.ts";
-import { findItem, priceOf, type StoreCatalog, visibleCategories } from "./catalog.ts";
+import {
+  addOne,
+  type Cart,
+  cartFromLines,
+  cartTotal,
+  itemCount,
+  itemQty,
+  qtyOf,
+  setNoteAt,
+  setQty,
+  setQtyAt,
+} from "./cart.ts";
+import {
+  extraGroupsOf,
+  extraOptions,
+  findItem,
+  priceOfLine,
+  type StoreCatalog,
+  sharedTags,
+  visibleCategories,
+} from "./catalog.ts";
 import { type Child, h, mount } from "./dom.ts";
+import { eventLineSlot, guestEventSlot } from "./events.ts";
 import { follow } from "./live.ts";
 import { addRecent, isId, isRecent, parseList, type RecentOrder, toggleFavourite } from "./local.ts";
+import { needsOptions, openOptions } from "./options-sheet.ts";
 import { qrSvg } from "./qr.ts";
 import {
   forgetOrder,
@@ -32,15 +54,19 @@ import { lang, t, tn, useStrings } from "./strings.ts";
 import { button, linkButton, roundButton } from "./ui/button.ts";
 import { card, quickCard } from "./ui/card.ts";
 import { badge, pill } from "./ui/chip.ts";
+import { showDialog } from "./ui/dialog.ts";
 import { appHeader } from "./ui/header.ts";
 import { icon, iconRef, mediaUrl } from "./ui/icon.ts";
 import { openSheet } from "./ui/sheet.ts";
+import { transition, watchBoot } from "./ui/shell.ts";
 import { menuSkeleton } from "./ui/skeleton.ts";
 import { addButton, stepper } from "./ui/stepper.ts";
 import { tabBar } from "./ui/tabbar.ts";
 import { initMode, loadThemeInfo, type ThemeInfo, toggleMode, watchTheme } from "./ui/theme-client.ts";
 import { type Step, timeline } from "./ui/timeline.ts";
 import { toast } from "./ui/toast.ts";
+
+watchBoot();
 
 interface Created {
   order: CustomerOrderView;
@@ -59,6 +85,8 @@ function seconds(name: string, fallback: number, min: number, maxS: number): num
 const resetSeconds = seconds("reset", 20, 2, 600);
 /** A kiosk left mid-order goes back to a fresh start after this long without a touch. */
 const IDLE_MS = seconds("idle", 120, 2, 3600) * 1000;
+/** Most items the "Most loved" strip shows. */
+const FEATURED_MAX = 10;
 /** An open menu re-reads the catalog this often, so the owner's availability switches reach it (`&catalog=<s>`). */
 const CATALOG_MS = seconds("catalog", 30, 2, 600) * 1000;
 const locale = navigator.language;
@@ -76,8 +104,31 @@ let cart: Cart = [];
 let query = "";
 let categoryId: string | undefined;
 let customerName = "";
+/** Ids of the diet and allergen filters switched on; they apply to the whole menu. */
+const activeFilters = new Set<string>();
+/** Where the customer sits: a spot id from the QR on their table (`?spot=`) or the cart page's picker. */
+let spotId: string | undefined = params.get("spot") ?? undefined;
+/** The spot of the QR this page was opened from, and its key: only a room's own QR carries one (D-082). */
+const scannedSpot = spotId;
+let roomKey: string | undefined = takeRoomKey();
+
+/**
+ * The room key from the QR's address, kept in this tab's storage for its room and taken out of the address bar, so a link
+ * the guest shares (or a screenshot of the address) doesn't carry the key; a reload in the room still has it.
+ */
+function takeRoomKey(): string | undefined {
+  if (scannedSpot === undefined) return undefined;
+  const slot = `ibow.roomKey.${scannedSpot}`;
+  const fromUrl = params.get("key");
+  if (fromUrl === null) return kv.get(slot);
+  kv.set(slot, fromUrl);
+  const url = new URL(location.href);
+  url.searchParams.delete("key");
+  history.replaceState(history.state, "", url);
+  return fromUrl;
+}
 /** How the customer means to pay, chosen on the cart page. */
-let payChoice: "upi" | "counter" = "upi";
+let payChoice: "upi" | "counter" | "room" = "upi";
 /** The order being changed within its edit window, and its token for the banner. */
 let editing: (OrderRef & { token: string }) | undefined;
 /** The client key of a create that hasn't been answered yet, so a retry can't make a second order. */
@@ -99,11 +150,13 @@ function storage(name: "sessionStorage" | "localStorage"): Storage | undefined {
 
 const money = (minor: number) => formatPrice(minor, catalog.business.currency, locale);
 const max = () => catalog.business.maxQtyPerLine;
-const price = (itemId: string, size?: string) => priceOf(catalog.categories, itemId, size);
+const price = (itemId: string, size?: string, extras?: readonly string[]) => priceOfLine(catalog, itemId, size, extras);
 const favourites = () => parseList(local.get("ibow.fav"), isId);
 const recents = () => parseList(local.get("ibow.recent"), isRecent);
 
-function statusText(s: OrderStatus): string {
+/** With a spot (the QR on the table), a ready order is brought there, so the guest is never told to collect it. */
+function statusText(s: OrderStatus, spot?: string): string {
+  if (s === "completed" && spot !== undefined) return t("statusCompletedBrought", { spot });
   return { pending: t("statusPending"), preparing: t("statusPreparing"), completed: t("statusCompleted") }[s];
 }
 
@@ -112,11 +165,67 @@ function shown(o: { status: OrderStatus; ready: boolean }): OrderStatus {
   return o.ready ? "completed" : o.status;
 }
 
+/** Why the storefront can't take an order now (the server's own rule: past the last-order time), or undefined. */
+function orderingBlock(): "closed" | "last" | undefined {
+  const hours = catalog.business.hours;
+  if (hours === undefined) return undefined;
+  const now = Date.now();
+  const zone = catalog.business.timeZone;
+  if (takesOrdersAt(hours, now, zone)) return undefined;
+  return isOpenAt(hours, now, zone) ? "last" : "closed";
+}
+
+/** Tells the customer, in a dialog, why ordering is paused and when it opens; browsing stays possible. */
+function explainBlock(block: "closed" | "last"): Promise<void> {
+  const hours = catalog.business.hours;
+  const time = hours?.open ?? "";
+  const zone = catalog.business.timeZone;
+  // A whole closed day says which day it opens again, named in the customer's language.
+  const shutToday = hours !== undefined && closedDayAt(hours, Date.now(), zone);
+  const day = () =>
+    new Intl.DateTimeFormat(lang, { weekday: "long", timeZone: zone }).format(
+      nextOpenDay(hours as NonNullable<typeof hours>, Date.now(), zone),
+    );
+  return showDialog({
+    icon: block === "closed" ? "crescent_moon" : "hourglass_not_done",
+    tone: "warn",
+    title: shutToday ? t("closedDayTitle") : block === "closed" ? t("closedTitle") : t("lastOrderTitle"),
+    body: h(
+      "p",
+      {},
+      shutToday
+        ? t("closedDayBody", { day: day(), time })
+        : block === "closed"
+          ? t("closedBody", { time })
+          : t("lastOrderBody", { last: hours?.lastOrder ?? "", time }),
+    ),
+    actions: [{ label: t("browseMenu"), kind: "primary" }],
+    testid: "closed-dialog",
+  });
+}
+
+/** True when an order can be started now; otherwise explains why in a dialog and returns false. */
+function canOrder(): boolean {
+  const block = orderingBlock();
+  if (block === undefined) return true;
+  void explainBlock(block);
+  return false;
+}
+
 function failureText(e: unknown): string {
   if (!(e instanceof ApiFailure)) return t("failed");
   if (e.code === "network") return t("offline");
+  if (e.code === "closed") return t("ordersClosed", { time: catalog.business.hours?.open ?? "" });
   if (e.code === "rate_limited") return t("tooMany");
-  if (e.code === "unavailable_item" || e.code === "unknown_item" || e.code === "bad_size") return t("itemGone");
+  if (
+    e.code === "sold_out" ||
+    e.code === "unavailable_item" ||
+    e.code === "unknown_item" ||
+    e.code === "bad_size" ||
+    e.code === "bad_extras"
+  ) {
+    return t("itemGone");
+  }
   if (e.code === "edit_expired" || e.code === "already_paid" || e.code === "not_pending") return t("editClosed");
   return t("failed");
 }
@@ -173,13 +282,22 @@ function priceText(item: CatalogItem): Child[] {
   ];
 }
 
+/** A tag every item of a section shares ("Vegan" on every dish of the Vegan section) says nothing there, so it is not shown. */
+function sectionTags(item: CatalogItem): ReadonlySet<string> {
+  const cat = catalog.categories.find((c) => c.items.some((i) => i.id === item.id));
+  return cat === undefined ? new Set() : sharedTags(cat.items);
+}
+
 function tagFor(item: CatalogItem): Child {
   const mode = theme.features.tags;
   if (mode === "off") return null;
   const computed = mode === "auto" ? theme.popular[item.id] : undefined;
   if (computed === "bestseller") return h("span", { class: "tag" }, icon("fire"), t("tagBestseller"));
   if (computed === "popular") return h("span", { class: "tag" }, icon("star"), t("tagPopular"));
-  const own = item.tags?.[0];
+  const shared = sectionTags(item);
+  // Nor a tag the dish's own name already says ("Vegan" over "Vegan Pancake").
+  const name = item.name.toLowerCase();
+  const own = item.tags?.find((tag) => !shared.has(tag.toLowerCase()) && !name.includes(tag.toLowerCase()));
   if (own === undefined) return null;
   const known =
     own.toLowerCase() === "bestseller" ? t("tagBestseller") : own.toLowerCase() === "popular" ? t("tagPopular") : own;
@@ -197,7 +315,19 @@ function tagline(): Child {
   const hours = catalog.business.hours;
   if (hours === undefined) return t("tagline");
   const open = isOpenAt(hours, Date.now(), catalog.business.timeZone);
-  return [open && h("span", { class: "dot" }), open ? t("openNow") : t("closedNow"), " · ", t("tagline")];
+  const taking = takesOrdersAt(hours, Date.now(), catalog.business.timeZone);
+  const last = hours.lastOrder !== undefined && open && taking;
+  // Two lines: where the day stands, then the business's line. One run-on line wrapped mid-phrase on a phone.
+  return [
+    h(
+      "span",
+      { class: "open-line" },
+      open && taking && h("span", { class: "dot" }),
+      open ? (taking ? t("openNow") : t("lastOrdersTaken")) : t("closedNow"),
+      last && hours.lastOrder !== undefined ? ` · ${t("lastOrderAt", { time: hours.lastOrder })}` : "",
+    ),
+    h("span", { class: "tag-line" }, t("tagline")),
+  ];
 }
 
 function header(
@@ -278,7 +408,10 @@ function menuView(): void {
   const gen = generation;
   const list = h("div", { class: "items" });
   const rail = h("div", { class: "rail", role: "group", "aria-label": t("categories") });
+  const filterRail = h("div", { class: "rail filters", role: "group", "aria-label": t("filters") });
   const quick = h("div");
+  const paused = h("div");
+  const featured = h("div");
   const bar = h("div");
   const tabsSlot = h("div");
   const redraws = new Map<string, () => void>();
@@ -289,92 +422,34 @@ function menuView(): void {
     for (const fn of redraws.values()) fn();
   };
 
-  function openSizes(item: CatalogItem): void {
-    const variants = item.variants ?? [];
-    let size = variants[0]?.size as string;
-    let qty = 1;
-    const opts = h("div", { role: "radiogroup", "aria-label": t("chooseSize") });
-    const foot = h("div", { class: "sheet-foot" });
-    const sizePrice = () => variants.find((v) => v.size === size)?.price ?? 0;
-    const sheet = openSheet({
-      title: item.name,
-      ...(item.description ? { subtitle: item.description } : {}),
+  function openChoices(item: CatalogItem): void {
+    openOptions({
+      catalog,
+      item,
+      money,
       lead: tile(item, "xs"),
-      label: t("sizesFor", { item: item.name }),
-      closeLabel: t("close"),
-      body: [
-        h("div", { class: "bill" }, h("span", { class: "label" }, t("chooseSize")), badge(t("required"))),
-        opts,
-        foot,
-      ],
+      room: (c) => max() - qtyOf(cart, item.id, c.size, c),
+      t: t as (key: string, vars?: Record<string, string>) => string,
+      onAdd: (c) => {
+        cart = setQty(cart, item.id, c.size, qtyOf(cart, item.id, c.size, c) + c.qty, max(), c);
+        refreshCart(true);
+      },
     });
-    const draw = () => {
-      mount(
-        opts,
-        ...variants.map((v) =>
-          h(
-            "button",
-            {
-              type: "button",
-              class: "opt",
-              role: "radio",
-              "aria-checked": String(v.size === size),
-              on: {
-                click: () => {
-                  size = v.size;
-                  draw();
-                },
-              },
-            },
-            h("div", { class: "nm" }, h("b", {}, v.size)),
-            h("span", { class: "pr num" }, money(v.price)),
-            h("span", { class: "radio", "aria-hidden": "true" }),
-          ),
-        ),
-      );
-      mount(
-        foot,
-        stepper({
-          qty,
-          max: Math.max(1, max() - qtyOf(cart, item.id, size)),
-          less: t("less", { item: item.name }),
-          more: t("more", { item: item.name }),
-          size: "lg",
-          onChange: (q) => {
-            qty = Math.max(1, q);
-            draw();
-          },
-        }),
-        button(
-          {
-            kind: "primary",
-            testid: "sheet-add",
-            disabled: qtyOf(cart, item.id, size) >= max(),
-            onClick: () => {
-              cart = setQty(cart, item.id, size, qtyOf(cart, item.id, size) + qty, max());
-              sheet.close();
-              refreshCart(true);
-            },
-          },
-          t("addWithPrice", { price: money(sizePrice() * qty) }),
-        ),
-      );
-    };
-    draw();
   }
 
   const card_ = (item: CatalogItem) => {
     const ctl = h("div", { class: "ctl" });
     const draw = (focus?: "less" | "more") => {
-      if (item.variants) {
-        const n = item.variants.reduce((sum, v) => sum + qtyOf(cart, item.id, v.size), 0);
+      if (needsOptions(catalog, item)) {
         mount(
           ctl,
           addButton({
             label: t("addItem", { item: item.name }),
             text: t("add"),
-            count: n,
-            onClick: () => openSizes(item),
+            count: itemQty(cart, item.id),
+            onClick: () => {
+              if (canOrder()) openChoices(item);
+            },
           }),
         );
         return;
@@ -386,6 +461,7 @@ function menuView(): void {
           text: t("add"),
           disabled: max() < 1,
           onClick: () => {
+            if (!canOrder()) return;
             cart = addOne(cart, item.id, undefined, max());
             refreshCart(true);
             ctl.querySelectorAll("button")[1]?.focus();
@@ -413,13 +489,17 @@ function menuView(): void {
     redraws.set(item.id, draw);
     draw();
     const starred = favourites().includes(item.id);
+    const pictured = theme.features.tiles === "always" || item.image !== undefined;
     return h(
       "article",
-      { class: "item", "data-item": item.id },
+      { class: pictured ? "item" : "item nopic", "data-item": item.id },
       h(
         "div",
         { class: "tx" },
         tagFor(item),
+        catalog.left?.[item.id] !== undefined &&
+          (catalog.left[item.id] as number) <= 5 &&
+          h("span", { class: "chip warn" }, t("leftToday", { n: String(catalog.left[item.id]) })),
         h(
           "h3",
           {},
@@ -434,7 +514,7 @@ function menuView(): void {
       h(
         "div",
         { class: "pic-wrap" },
-        tile(item),
+        pictured && tile(item),
         theme.features.favourites &&
           !kiosk &&
           h(
@@ -458,6 +538,29 @@ function menuView(): void {
       ),
     );
   };
+
+  function renderFilters(): void {
+    const all = catalog.filters ?? [];
+    mount(
+      filterRail,
+      ...all.map((f) =>
+        pill({
+          label: f.name,
+          selected: activeFilters.has(f.id),
+          testid: `filter-${f.id}`,
+          onClick: () => {
+            if (activeFilters.has(f.id)) activeFilters.delete(f.id);
+            else activeFilters.add(f.id);
+            renderFilters();
+            renderList();
+            // The chips were rebuilt: keep the focus on the one just pressed.
+            filterRail.querySelector<HTMLElement>(`[data-testid="filter-${CSS.escape(f.id)}"]`)?.focus();
+          },
+        }),
+      ),
+      all.length > 0 && h("small", { class: "muted" }, t("filtersNote")),
+    );
+  }
 
   function renderRail(): void {
     const all = visibleCategories(catalog.categories);
@@ -538,7 +641,7 @@ function menuView(): void {
         const fresh = quickCard({
           icon: icon("ticket"),
           title: t("tokenCard", { token: r.order.token }),
-          hint: statusText(shown(r.order)),
+          hint: statusText(shown(r.order), r.order.spot),
           href: "#/order",
           live: done ? undefined : t("live"),
           testid: "quick-token",
@@ -577,7 +680,10 @@ function menuView(): void {
                       onClick: () => {
                         let next = cart;
                         for (const l of o.lines) {
-                          if (price(l.itemId, l.size) !== undefined)
+                          if (
+                            price(l.itemId, l.size) !== undefined &&
+                            extraGroupsOf(catalog, l.itemId).every((g) => g.min === 0)
+                          )
                             next = setQty(next, l.itemId, l.size, qtyOf(next, l.itemId, l.size) + l.qty, max());
                         }
                         if (next === cart) toast(t("itemGone"), "err");
@@ -597,9 +703,97 @@ function menuView(): void {
     });
   }
 
+  /**
+   * The "Most loved" strip (`features.featured`): items with a photo, today's best sellers first, on the unfiltered menu
+   * only. A card shows the item in the menu, where its own Add and choices are.
+   */
+  /** The slim banner while ordering is paused, and once per visit the dialog that says when it opens. */
+  function renderPaused(): void {
+    const block = orderingBlock();
+    const hours = catalog.business.hours;
+    mount(
+      paused,
+      block !== undefined &&
+        h(
+          "p",
+          { class: "notice", role: "status", "data-testid": "ordering-paused" },
+          icon(block === "closed" ? "crescent_moon" : "hourglass_not_done"),
+          h(
+            "span",
+            {},
+            block === "closed"
+              ? t("pausedNotice", { time: hours?.open ?? "" })
+              : t("pausedNoticeLast", { last: hours?.lastOrder ?? "", time: hours?.open ?? "" }),
+          ),
+        ),
+    );
+    if (block !== undefined && sessionStorage.getItem("ibow.pausedSeen") !== "1") {
+      try {
+        sessionStorage.setItem("ibow.pausedSeen", "1");
+      } catch {
+        // storage can be off; the dialog then shows on each visit, which is still right
+      }
+      void explainBlock(block);
+    }
+  }
+
+  function renderFeatured(): void {
+    const show = theme.features.featured && !kiosk && query === "" && categoryId === undefined;
+    const rank = (id: string) => (theme.popular[id] === "bestseller" ? 0 : theme.popular[id] === "popular" ? 1 : 2);
+    const items = show
+      ? catalog.categories
+          .flatMap((c) => c.items)
+          .filter((i) => i.image !== undefined && i.available !== false)
+          .sort((a, b) => rank(a.id) - rank(b.id))
+          .slice(0, FEATURED_MAX)
+      : [];
+    mount(
+      featured,
+      items.length > 0 &&
+        h(
+          "section",
+          { class: "feat-sec", "data-testid": "featured" },
+          h("div", { class: "sec" }, icon("sparkles"), h("h2", {}, t("featured"))),
+          h(
+            "div",
+            { class: "feat" },
+            ...items.map((item) =>
+              h(
+                "button",
+                {
+                  type: "button",
+                  class: "fcard",
+                  "aria-label": t("featuredOpen", { item: item.name }),
+                  on: {
+                    click: () => {
+                      const el = list.querySelector<HTMLElement>(`[data-item="${CSS.escape(item.id)}"]`);
+                      if (!el) return;
+                      el.scrollIntoView({ behavior: "smooth", block: "center" });
+                      el.classList.remove("flash");
+                      void el.offsetWidth;
+                      el.classList.add("flash");
+                    },
+                  },
+                },
+                h("img", { src: mediaUrl(item.image ?? ""), alt: "", loading: "lazy", decoding: "async" }),
+                h(
+                  "span",
+                  { class: "ft" },
+                  h("b", {}, item.name),
+                  h("span", { class: "price num" }, ...priceText(item)),
+                ),
+              ),
+            ),
+          ),
+        ),
+    );
+  }
+
   function renderList(): void {
+    renderFeatured();
     redraws.clear();
-    let cats = visibleCategories(catalog.categories, query, categoryId === FAVOURITES ? undefined : categoryId);
+    const on = (catalog.filters ?? []).filter((f) => activeFilters.has(f.id));
+    let cats = visibleCategories(catalog.categories, query, categoryId === FAVOURITES ? undefined : categoryId, on);
     if (categoryId === FAVOURITES) {
       const stars = new Set(favourites());
       cats = cats
@@ -672,15 +866,18 @@ function menuView(): void {
           ),
         ),
       rail,
-      h("main", {}, quick, list),
+      filterRail,
+      h("main", {}, paused, guestEventSlot(kiosk ? undefined : deviceStorage()), featured, quick, list),
       bar,
       tabsSlot,
     ),
   );
   mount(tabsSlot, tabs("menu"));
   renderRail();
+  renderFilters();
   renderQuick();
   renderList();
+  renderPaused();
   fillLiveCard();
   const poll = setInterval(async () => {
     const fresh = await api<StoreCatalog>("GET", "/api/catalog").catch(() => undefined);
@@ -710,8 +907,8 @@ function cartView(): void {
     money(total),
   );
 
-  const step = (itemId: string, size: string | undefined, qty: number) => {
-    cart = setQty(cart, itemId, size, qty, max());
+  const step = (index: number, qty: number) => {
+    cart = setQtyAt(cart, index, qty, max());
     cartView();
   };
 
@@ -723,6 +920,8 @@ function cartView(): void {
       itemId: l.itemId,
       qty: l.qty,
       ...(l.size === undefined ? {} : { size: l.size }),
+      ...(l.extras === undefined ? {} : { extras: l.extras }),
+      ...(l.note === undefined ? {} : { note: l.note }),
     }));
     try {
       if (editing) {
@@ -736,7 +935,13 @@ function cartView(): void {
       pendingKey ??= newClientKey();
       const name = customerName.trim();
       const created = await api<Created>("POST", "/api/orders", {
-        body: { clientKey: pendingKey, lines, ...(name ? { customerName: name } : {}) },
+        body: {
+          clientKey: pendingKey,
+          lines,
+          ...(name ? { customerName: name } : {}),
+          ...(knownSpot() === undefined ? {} : { spot: knownSpot() }),
+          ...(payChoice === "room" && inRoom() ? { pay: "room", roomKey } : {}),
+        },
       });
       pendingKey = undefined;
       if (!kiosk) {
@@ -760,9 +965,31 @@ function cartView(): void {
       if (payChoice === "counter") kv.set(`ibow.counter.${created.order.id}`, "1");
       location.hash = "#/order";
     } catch (e) {
-      error.textContent = failureText(e);
       place.disabled = false;
-      if (e instanceof ApiFailure && ["unavailable_item", "unknown_item", "bad_size"].includes(e.code)) {
+      if (e instanceof ApiFailure && e.code === "closed") {
+        void explainBlock(orderingBlock() ?? "closed");
+        return;
+      }
+      if (e instanceof ApiFailure && ["sold_out", "unavailable_item", "unknown_item"].includes(e.code)) {
+        void showDialog({
+          icon: "hourglass_not_done",
+          tone: "warn",
+          title: t("itemGoneTitle"),
+          body: h("p", {}, t("itemGoneBody")),
+          actions: [{ label: t("backToCart"), kind: "primary" }],
+          testid: "item-gone-dialog",
+        });
+      } else if (e instanceof ApiFailure && e.code === "network") {
+        void showDialog({
+          icon: "mobile_phone",
+          title: t("offlineTitle"),
+          body: h("p", {}, t("offlineBody")),
+          actions: [{ label: t("tryAgain"), kind: "primary", onClick: () => void submit() }],
+          testid: "offline-dialog",
+        });
+      }
+      error.textContent = failureText(e);
+      if (e instanceof ApiFailure && ["unavailable_item", "unknown_item", "bad_size", "bad_extras"].includes(e.code)) {
         catalog = await api<StoreCatalog>("GET", "/api/catalog").catch(() => catalog);
       }
       if (editing && e instanceof ApiFailure && ["edit_expired", "already_paid", "not_pending"].includes(e.code)) {
@@ -772,7 +999,7 @@ function cartView(): void {
     }
   }
 
-  const payRow = (id: "upi" | "counter", ic: string, title: string, sub: string) =>
+  const payRow = (id: "upi" | "counter" | "room", ic: string, title: string, sub: string) =>
     h(
       "button",
       {
@@ -816,9 +1043,10 @@ function cartView(): void {
         { class: "page cart" },
         card(
           {},
-          ...cart.map((l) => {
+          ...cart.map((l, index) => {
             const item = findItem(catalog.categories, l.itemId);
             const name = item?.name ?? l.itemId;
+            const picked = extraOptions(catalog, l.extras);
             return h(
               "div",
               { class: "line" },
@@ -831,8 +1059,23 @@ function cartView(): void {
                   "small",
                   {},
                   l.size && h("span", { class: "sz" }, l.size),
-                  t("each", { price: money(price(l.itemId, l.size) ?? 0) }),
+                  t("each", { price: money(price(l.itemId, l.size, l.extras) ?? 0) }),
                 ),
+                picked.length > 0 && h("span", { class: "extras" }, picked.map((o) => o.name).join(" + ")),
+                h("input", {
+                  type: "text",
+                  class: "note-input",
+                  maxlength: "80",
+                  value: l.note ?? "",
+                  placeholder: t("addNote"),
+                  "aria-label": t("noteLabel"),
+                  on: {
+                    change: (e) => {
+                      cart = setNoteAt(cart, index, (e.target as HTMLInputElement).value, max());
+                      cartView();
+                    },
+                  },
+                }),
               ),
               h(
                 "div",
@@ -843,14 +1086,14 @@ function cartView(): void {
                   size: "sm",
                   less: t("less", { item: lineName(l.itemId, l.size) }),
                   more: t("more", { item: lineName(l.itemId, l.size) }),
-                  onChange: (q) => step(l.itemId, l.size, q),
+                  onChange: (q) => step(index, q),
                 }),
-                h("b", { class: "num" }, money((price(l.itemId, l.size) ?? 0) * l.qty)),
+                h("b", { class: "num" }, money((price(l.itemId, l.size, l.extras) ?? 0) * l.qty)),
               ),
             );
           }),
         ),
-        hasUpi && [
+        (hasUpi || inRoom()) && [
           h(
             "div",
             { class: "bill" },
@@ -859,23 +1102,27 @@ function cartView(): void {
           ),
           h(
             "div",
-            { role: "radiogroup", "aria-label": t("payWith"), class: "page" },
-            payRow("upi", "mobile_phone", t("payUpiTitle"), t("payUpiSub")),
+            { role: "radiogroup", "aria-label": t("payWith"), class: "pay-opts" },
+            hasUpi && payRow("upi", "mobile_phone", t("payUpiTitle"), t("payUpiSub")),
             payRow("counter", "money_bag", t("payCounterTitle"), t("payCounterSub")),
+            inRoom() && payRow("room", "bell", t("payRoomTitle"), t("payRoomSub")),
           ),
         ],
         askName &&
           !editing &&
           card(
-            {},
+            { class: "name-card" },
             h(
               "label",
               { class: "field" },
-              t("yourName"),
+              h("span", { class: "name-q" }, icon("face_savoring_food"), t("yourName")),
               h("input", {
                 type: "text",
                 maxlength: "60",
                 autocomplete: "given-name",
+                autocapitalize: "words",
+                enterkeyhint: "done",
+                placeholder: t("yourNamePlaceholder"),
                 value: customerName,
                 on: {
                   input: (e) => {
@@ -883,8 +1130,10 @@ function cartView(): void {
                   },
                 },
               }),
+              h("small", { class: "muted" }, t("yourNameHint")),
             ),
           ),
+        spotPicker(),
         card({}, h("div", { class: "bill t" }, h("span", {}, t("total")), h("strong", { class: "num" }, money(total)))),
         error,
       ),
@@ -899,6 +1148,71 @@ function cartView(): void {
         ),
       ),
     ),
+  );
+}
+
+// ── Where the customer sits ─────────────────────────────────────────────────────────────────────────────────────────
+
+/** Whether the guest orders from a room (the QR in the room), which offers the room bill (D-082). */
+function isRoomSpot(id: string | undefined): boolean {
+  return id !== undefined && catalog.zones?.some((z) => z.kind === "room" && z.spots.some((s) => s.id === id)) === true;
+}
+
+/** Whether the guest may put this order on a room bill: they opened the page from that room's QR, key and all. */
+function inRoom(): boolean {
+  const id = knownSpot();
+  return isRoomSpot(id) && id === scannedSpot && roomKey !== undefined;
+}
+
+/** The phone's own storage for small choices (a dismissed banner); absent where the browser refuses it. */
+function deviceStorage(): Storage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The spot id to send: only one the catalog's zones know, so a stale QR or a typo never fails an order. */
+function knownSpot(): string | undefined {
+  return catalog.zones?.some((z) => z.spots.some((s) => s.id === spotId)) ? spotId : undefined;
+}
+
+/** "Where are you sitting?": a choice among the business's spots, preset by the QR on the table. Nothing without spots. */
+function spotPicker(): Child {
+  const zones = catalog.zones;
+  if (kiosk || editing || zones === undefined || zones.length === 0) return null;
+  const select = h(
+    "select",
+    {
+      "data-testid": "spot",
+      on: {
+        change: (e) => {
+          spotId = (e.target as HTMLSelectElement).value || undefined;
+        },
+      },
+    },
+    h("option", { value: "" }, t("spotNone")),
+    // A room is offered only to the guest who scanned its QR; everyone else picks among the tables (D-082).
+    ...zones.flatMap((z) => {
+      const spots = z.kind === "room" ? z.spots.filter((sp) => sp.id === scannedSpot) : z.spots;
+      return spots.length === 0
+        ? []
+        : [
+            h(
+              "optgroup",
+              { label: z.name },
+              ...spots.map((sp) => h("option", { value: sp.id, selected: sp.id === knownSpot() }, sp.label)),
+            ),
+          ];
+    }),
+  );
+  // A guest whose QR is in their room is asked about the room, not a seat.
+  const room = inRoom();
+  return card(
+    {},
+    h("label", { class: "field" }, room ? t("roomLabel") : t("spotLabel"), select),
+    h("p", { class: "muted" }, room ? t("roomHint") : t("spotHint")),
   );
 }
 
@@ -966,14 +1280,13 @@ function upiPanel(
 
 // ── Token page ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** `11-047` as a large number with the day small before it. */
+/** The order number, large: `25-047` reads "#47" (the day stays in the data, M13). */
 function tokenView(token: string, huge = false): HTMLElement {
-  const dash = token.indexOf("-");
+  const shown = orderNumber(token);
   return h(
     "p",
-    { class: `tk${huge ? " huge" : ""}`, "data-testid": "token" },
-    dash > 0 ? h("small", {}, token.slice(0, dash + 1)) : null,
-    dash > 0 ? token.slice(dash + 1) : token,
+    { class: `tk${huge ? " huge" : ""}`, "data-testid": "token", "data-token": token },
+    shown.startsWith("#") ? [h("small", {}, "#"), shown.slice(1)] : shown,
   );
 }
 
@@ -1023,6 +1336,12 @@ async function orderView(ref: OrderRef): Promise<void> {
 
   function payment(): Child {
     const p = order.payment;
+    if (order.roomBill !== undefined) {
+      return card(
+        { class: "pay room", "data-testid": "room-bill" },
+        h("p", {}, order.roomBill === "open" ? t("roomBillNote") : t("roomBillSettled")),
+      );
+    }
     if (p.state === "confirmed") {
       return order.outstandingMinor <= 0
         ? card({ class: "pay paid" }, h("p", {}, t("paid")))
@@ -1163,8 +1482,11 @@ async function orderView(ref: OrderRef): Promise<void> {
         state: at > 1 ? "done" : at === 1 ? "now" : "todo",
       },
       {
-        title: t("stepReady"),
-        sub: t("stepReadySub", { token: order.token }),
+        title: order.spot === undefined ? t("stepReady") : t("stepReadyBrought"),
+        sub:
+          order.spot === undefined
+            ? t("stepReadySub", { token: order.token })
+            : t("stepReadyBroughtSub", { spot: order.spot }),
         ...(at === 2 ? { time: t("now") } : {}),
         state: at === 2 ? "now" : "todo",
       },
@@ -1209,7 +1531,13 @@ async function orderView(ref: OrderRef): Promise<void> {
             h(
               "div",
               { class: "bill" },
-              h("span", {}, `${l.qty} × ${lineName(l.itemId, l.size, l.name)}`),
+              h(
+                "span",
+                {},
+                `${l.qty} × ${lineName(l.itemId, l.size, l.name)}`,
+                l.extras && h("span", { class: "extras" }, l.extras.map((e) => e.name).join(" + ")),
+                l.note && h("span", { class: "note" }, l.note),
+              ),
               h("span", { class: "num" }, money(l.unitMinor * l.qty)),
             ),
           ),
@@ -1221,7 +1549,7 @@ async function orderView(ref: OrderRef): Promise<void> {
   function render(): void {
     const now = shown(order);
     pillEl.className = `live-pill${now === "completed" ? " done" : ""}`;
-    mount(pillEl, h("i"), statusText(now));
+    mount(pillEl, h("i"), statusText(now, order.spot));
     const showEta = theme.features.cartEta && theme.etaMinutes !== undefined && now !== "completed";
     etaEl.textContent = showEta ? t("etaReady", { n: String(theme.etaMinutes) }) : "";
     const items = order.lines.reduce((n, l) => n + l.qty, 0);
@@ -1250,7 +1578,16 @@ async function orderView(ref: OrderRef): Promise<void> {
               kind: "ghost",
               onClick: () => {
                 editing = { ...ref, token: order.token };
-                cart = cartFromLines(order.lines, max());
+                cart = cartFromLines(
+                  order.lines.map((l) => ({
+                    itemId: l.itemId,
+                    qty: l.qty,
+                    ...(l.size === undefined ? {} : { size: l.size }),
+                    ...(l.extras === undefined ? {} : { extras: l.extras.map((e) => e.id) }),
+                    ...(l.note === undefined ? {} : { note: l.note }),
+                  })),
+                  max(),
+                );
                 location.hash = "#/";
               },
             },
@@ -1292,7 +1629,18 @@ async function orderView(ref: OrderRef): Promise<void> {
     h("span", { class: "tkicon" }, icon("ticket")),
     h("p", { class: "label" }, t("yourToken")),
     tokenView(order.token),
-    order.customerName !== undefined && h("p", { class: "for muted" }, t("forName", { name: order.customerName })),
+    order.customerName !== undefined && h("p", { class: "who", "data-testid": "order-name" }, order.customerName),
+    order.spot !== undefined &&
+      h(
+        "p",
+        { class: "for" },
+        h(
+          "span",
+          { class: "spot-badge", "aria-label": t("spotAt", { spot: order.spot }) },
+          icon("map_pin"),
+          order.spot,
+        ),
+      ),
     pillEl,
     etaEl,
     h("div", { class: "perf" }),
@@ -1323,6 +1671,7 @@ async function orderView(ref: OrderRef): Promise<void> {
           { class: "page" },
           card({}, slots.tracker),
           slots.payment,
+          eventLineSlot(),
           slots.edit,
           slots.actions,
           slots.review,
@@ -1357,7 +1706,7 @@ async function orderView(ref: OrderRef): Promise<void> {
       const before = shown(order);
       order = e.order;
       if (shown(order) !== before) {
-        announce(t("alertTitle", { token: order.token }), statusText(shown(order)));
+        announce(t("alertTitle", { token: order.token }), statusText(shown(order), order.spot));
       }
       render();
       // Orders ahead changes as other orders finish; the snapshot route is the one place that counts them.
@@ -1413,7 +1762,7 @@ function lookupView(): void {
     h(
       "div",
       { class: "shell" },
-      header({ title: t("findToken"), subtitle: t("trackSub"), back: true }),
+      header({ title: t("findToken"), subtitle: t("findSub"), back: true }),
       h(
         "main",
         { class: "page lookup" },
@@ -1549,12 +1898,17 @@ async function start(): Promise<void> {
   }
   catalog = loadedCatalog as StoreCatalog;
   document.title = catalog.business.name;
+  // A demo publishes its rooms' keys, so a plain `/?spot=rooms-1` link (a proposal page's) opens that room there too.
+  if (isRoomSpot(scannedSpot) && roomKey === undefined) {
+    const demo = await api<{ roomKeys?: Record<string, string> }>("GET", "/api/demo").catch(() => undefined);
+    roomKey = demo?.roomKeys?.[scannedSpot as string];
+  }
   document.documentElement.lang = lang;
   if (kiosk) {
     document.body.classList.add("kiosk");
     watchIdle();
   }
-  window.addEventListener("hashchange", () => route());
+  window.addEventListener("hashchange", () => transition(() => route()));
   route();
   // A look the owner saves reaches an open page: the sheet swaps at once, what the toggles change on the next draw.
   watchTheme(theme, (next) => {

@@ -24,7 +24,16 @@ export const FALLBACK: ThemeInfo = {
   version: "",
   header: { style: "awning" },
   categoryIcons: {},
-  features: { favourites: true, recent: true, tags: "catalog", veg: true, darkToggle: true, cartEta: false },
+  features: {
+    favourites: true,
+    recent: true,
+    tags: "catalog",
+    veg: true,
+    darkToggle: true,
+    cartEta: false,
+    tiles: "always",
+    featured: false,
+  },
   strings: {},
   popular: {},
 };

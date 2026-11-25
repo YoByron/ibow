@@ -9,7 +9,7 @@ import { openModel } from "../ai/index.ts";
 import { localTime } from "../core/insights.ts";
 import { demoMode } from "../demo/mode.ts";
 import { DEMO_VPA, type DemoPins, newDemoPins } from "../demo/pins.ts";
-import { seedDemo } from "../demo/seed.ts";
+import { seedDemo, topUpDemo } from "../demo/seed.ts";
 import { type App, createApp } from "../server/app.ts";
 import { assertHash, hashPin, pinDerivations } from "../server/auth.ts";
 import { EVENT_WINDOW_MS } from "../server/retention.ts";
@@ -40,6 +40,8 @@ const SEED_STEPS = [
   "pin:counter",
   "pin:station",
   "pin:owner",
+  "pin:manager",
+  "pin:admin",
   ...Array.from({ length: DEMO_PAST_DAYS + 1 }, (_, i) => `day:${DEMO_PAST_DAYS - i}`),
 ];
 
@@ -84,6 +86,7 @@ export class Install extends DurableObject<Bindings> {
       return undefined; // preparing: requests answer 503 until the last step has run
     }
     let ownerPinHash: string;
+    let adminPinHash: string | undefined;
     let demo: { pins: DemoPins } | undefined;
     if (mode === "real") {
       const hash = this.env.OWNER_PIN_HASH;
@@ -93,10 +96,13 @@ export class Install extends DurableObject<Bindings> {
         );
       }
       ownerPinHash = hash;
+      adminPinHash = this.env.ADMIN_PIN_HASH?.trim() || undefined;
     } else {
       demo = { pins: kv.get("demo_pins") as DemoPins };
       ownerPinHash = kv.get("demo_owner_pin_hash") as string;
+      adminPinHash = kv.get("demo_admin_pin_hash") as string;
     }
+    if (adminPinHash !== undefined) assertHash(adminPinHash, { legacy: false });
     assertHash(ownerPinHash, { legacy: false }); // throws now, at boot, if the hash is malformed or an old scrypt one
     const vpa = mode === "real" ? this.env.UPI_VPA?.trim() : config.business.currency === "INR" ? DEMO_VPA : undefined;
     const payments = vpa ? { upi: { vpa, payeeName: this.env.UPI_PAYEE_NAME?.trim() || config.business.name } } : {};
@@ -107,12 +113,14 @@ export class Install extends DurableObject<Bindings> {
       look: looks,
       store,
       ownerPinHash,
+      ...(adminPinHash === undefined ? {} : { adminPinHash }),
+      ...(mode === "real" && this.env.RENAME_ADMIN_STAFF ? { renameAdminStaff: this.env.RENAME_ADMIN_STAFF } : {}),
       payments,
       clientIp: (c) => c.req.header(CLIENT_IP_HEADER) ?? "unknown",
       ...(demo ? { demo } : {}),
       ...(ai ? { ai } : {}),
     });
-    this.#retain(store, Date.now());
+    this.#retain(store, Date.now(), app.retentionDays());
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + HOUR_MS);
     return { app, store, driver: driver as DoDriver };
   }
@@ -130,6 +138,10 @@ export class Install extends DurableObject<Bindings> {
       store.putStaff({ id: "station", name: "Stations (demo)", pinHash: await hashPin(pins.station), role: "station" });
     } else if (step === "pin:owner") {
       kv.put("demo_owner_pin_hash", await hashPin(pins.owner));
+    } else if (step === "pin:manager") {
+      store.putStaff({ id: "manager", name: "Manager (demo)", pinHash: await hashPin(pins.manager), role: "manager" });
+    } else if (step === "pin:admin") {
+      kv.put("demo_admin_pin_hash", await hashPin(pins.admin));
     } else {
       const upi = config.business.currency === "INR";
       seedDemo(store, {
@@ -147,8 +159,8 @@ export class Install extends DurableObject<Bindings> {
   }
 
   /** Customer names and review text are cleared after retentionDays: at boot and on every alarm (D-016, D-033). */
-  #retain(store: Store, now: number) {
-    const result = store.forgetCustomers(now - config.business.retentionDays * DAY_MS);
+  #retain(store: Store, now: number, days: number) {
+    const result = store.forgetCustomers(now - days * DAY_MS);
     store.pruneEvents(now - EVENT_WINDOW_MS);
     return result;
   }
@@ -170,7 +182,16 @@ export class Install extends DurableObject<Bindings> {
       }
       return;
     }
-    if (this.#running) this.#retain(this.#running.store, Date.now());
+    if (this.#running) {
+      this.#retain(this.#running.store, Date.now(), this.#running.app.retentionDays());
+      // A demo keeps its day going: the orders a fresh seed would have placed since the last hour (D-086).
+      if (this.#running.store.isDemo() && demoBundle) {
+        const upi = config.business.currency === "INR";
+        topUpDemo(this.#running.store, { config, rush, now: Date.now(), upi, scale: DEMO_SCALE });
+      }
+      // The counts of the last half minute reach the install's own row before the object may be evicted (D-076).
+      this.#running.app.flushTelemetry();
+    }
     await this.ctx.storage.setAlarm(Date.now() + HOUR_MS);
   }
 
@@ -202,8 +223,10 @@ export class Install extends DurableObject<Bindings> {
     if (url.pathname === "/__header-color") return new Response(this.#running.app.headerColor());
     if (url.pathname === "/__retention") {
       const now = Number(url.searchParams.get("now") ?? Date.now());
-      return Response.json(this.#retain(this.#running.store, now));
+      return Response.json(this.#retain(this.#running.store, now, this.#running.app.retentionDays()));
     }
+    // Whether `/showcase` is on now (the admin's switch), for the Worker, which serves that page from its assets.
+    if (url.pathname === "/__showcase") return new Response(this.#running.app.showcaseOn() ? "1" : "0");
     return this.#running.app.http.fetch(request);
   }
 }

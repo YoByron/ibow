@@ -8,6 +8,8 @@
 export interface ChatRequest {
   system: string;
   user: string;
+  /** Pictures that go with the user message, as `data:image/...;base64,` URLs (a photographed menu page). */
+  images?: readonly string[];
   /** The most tokens the model may write. */
   maxTokens: number;
   /** Overrides the configured timeout for this call. */

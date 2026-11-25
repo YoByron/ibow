@@ -91,6 +91,98 @@ every station stream receives exactly its own items with no gaps after a forced 
 - [ ] [owner] `wrangler login` and the first deploy
 **Checkpoint:** the 300-order rush replays in Miniflare (workerd, the runtime `wrangler dev` runs) with unique tokens and every station stream complete; the demo deploys from a fresh clone by following the README.
 
+## M10 Order-at-counter venues (operations; from a real garden cafe's menu, reviews and busy times)
+Customers queue, order and pay at the counter or on their phone, sit anywhere in a large space, and staff bring the order
+out. Reviews name the failures: staff shout names to find people, orders split across stations arrive in part and the
+rest never comes, changes to a dish are lost, ready drinks go cold, cakes sell out unseen. Generic for any such venue.
+- [x] Spots: optional `spots.json` (zones and tables); a QR per spot opens the storefront with it set; the customer can
+  also pick "where are you sitting"; the order carries the spot and every staff screen shows it; a printable QR sheet
+- [x] Extras: groups of options per item or category (min/max picks, a price each, e.g. oat milk +50, gluten-free +50,
+  extra shot +20), priced when added, shown in cart, token page, station batches (grouped by item and extras), speech
+  and the kitchen ticket
+- [x] A short note per line ("less spicy, no onion"), bounded, shown and spoken at the station and printed
+- [x] Routing per item: an item may name its station, overriding its category's
+- [x] Runner view: each open order with its spot and every line's station and state ("T12: 2 of 3 delivered, waiting on
+  Smoothies"); an alert when part of an order was delivered and the rest is late; ready-to-delivered minutes on the
+  owner's dashboard
+- [x] Diet and allergen filters on the storefront from item tags
+- [x] A daily count per item (set each morning, counts down, sold out at zero; not an inventory system)
+- [x] Card as a payment method staff record; refunds recorded (amount, method, who, when) and netted in the totals
+- [x] A last-order time: the storefront stops taking orders after it and says when it opens
+**Checkpoint:** a private cafe config runs all of it through `npm run demo -- <path>`; the 300-order rush with extras
+and spots replays with every line reaching one station; each change states its cost against a 300-order day.
+
+## M11 Premium look (owner: "icons all across the web are childish and generic; we want full premium")
+- [x] A theme for an order-at-counter garden cafe, decided from the research, shown before and after
+- [x] One premium icon set replacing the 3D emoji-style icons: coherent, drawn for ibow, self-hosted SVG, styled by
+  tokens; the theme picks it
+- [x] Item photos: the business's own dish photos in its config (never in the repo), cropped and compressed, lazy,
+  within the first-load budget
+- [x] Fix: the owner header breaks the business name mid-word on a phone; the prep list's numbers overflow the card
+- [ ] [owner] Approves the screens from fresh screenshots
+**Checkpoint:** the owner approves; all e2e pass; first load stays within the measured budget.
+
+## M12 Levels, links hub, feature flags and telemetry (owner, 2026-11-25)
+- [x] Card payments staff record, and refunds (amount, method, who, when) netted in every total (M10 item 8)
+- [x] Notes on lines are cleared with names after `retentionDays`; station batches show each order's spot
+- [x] Three levels above the staff screens: owner, manager (day-to-day: availability, daily counts, runner, refunds up to a
+  limit, staff screens) and system admin (install health, flags, retention, updates); each signs in with its own PIN; what each
+  level may do is one table in code and one in the docs
+- [x] A links hub at `/admin`: every screen of the install (storefront, kiosk, counter, stations, runner, owner tabs, spots
+  QR sheet, manager, admin), grouped by level, each with what it is for; shows only what the signed-in level may open
+- [x] Feature flags: the theme's and the business's switches changeable at run time by the level allowed to (owner for the
+  look and the menu's features, admin for system ones), stored in the install, audited (who, when, from what to what)
+- [x] Telemetry for the admin, kept on the install and never sent anywhere: requests and errors per hour, slowest routes,
+  open live streams, rows written today against the free plan, database size, build and uptime, last backup
+**Checkpoint:** each level signs in and sees exactly its links and powers; a flag flipped by the owner reaches an open
+storefront without a reload and appears in the audit; the telemetry page answers "is this install healthy" on a phone.
+
+## M13 App shell and the finish (owner, 2026-11-25)
+- [x] An app shell with a native feel on phones: installable, full-screen, safe areas, no page jumps, transitions between
+  screens, tab bars that stay put, pull-to-refresh only where it means something
+- [x] A splash screen with the business's mark, animated, that hands over to the first screen without a flash; skeletons
+  while data loads; one loading language across every screen
+- [x] Proper dialogs for every "can't do that now": closed, last order passed, sold out, paused, offline, with when it opens
+- [x] The customer's name first and an order number (not a token) everywhere a person reads it; the day stays in the data
+- [x] Every screen checked on a phone and improved: storefront, sheet, cart, pay, order page, kiosk, counter, stations,
+  runner, owner tabs, PIN screens, hub; tokens documented so the look can keep improving without code
+**Checkpoint:** the owner approves fresh screenshots of every screen; all e2e pass; first load within budget.
+
+## M14 Stays and events (lead, 2026-11-25)
+- [x] Rooms: a `spots.json` zone may be `"kind": "room"`; a guest at a room's QR may choose "Add to my room bill", which
+  stays unpaid and never counts as received until staff settle the room (D-082)
+- [x] A Rooms screen for counter staff, a manager and the owner: each room's open bill and total, "Settle at checkout" in one
+  cash, UPI or card payment covering exactly those orders, every settle audited; listed on the hub (D-083)
+- [x] The owner's Today shows room-bill money as ordered, received once settled, and an "Open room bills" figure
+- [x] Events in the store: title, date, start, optional end, one-line note, optional entry price, guests and staff or staff
+  only, "expect a rush", an optional weekly repeat with an end date; managed on the owner's Events tab and the manager's
+  screen; `events.json` seeds them once; cleared 2 days after their last day (D-084)
+- [x] Banners: the next event within 7 days on each staff, owner and hub splash and as a card on the chooser, manager screen,
+  Today and hub; on its day a CSS-only celebration and a countdown; for guests a dismissible banner under the storefront's
+  header and a line on the order page (D-085)
+- [x] Demo: the garden cafe has 6 rooms with open room bills, a rush-flagged guest event today, a weekly one and a staff-only
+  one in 3 days; a kept demo is topped up to the clock every hour, so Today reads like a day in progress (D-086)
+- [ ] [owner] Approves the Rooms, Events and banner screens from fresh screenshots
+**Checkpoint:** unit tests for the room-bill money rules, event visibility (guest and staff, the 7-day window, cleanup) and the
+seeded today; e2e: a guest in a room orders onto the room bill, staff settle it at checkout, and the owner's Received moves
+only then; the event banner on the splash and the storefront; `npm run gate` and `npm run e2e` green.
+
+## M15 Menu import (lead, 2026-11-25)
+- [x] `src/ai` requests may carry images, as data URLs in OpenAI-compatible content parts; the analyst's requests unchanged (D-091)
+- [x] `npm run import-menu -- <files...> --out <folder>/catalog.json [--currency] [--report] [--force]`: photos (png, jpg,
+  webp) go to the model as images; text, Markdown and HTML are read in code, HTML stripped in code; a PDF is refused with
+  "export its pages as images" (D-093)
+- [x] The model reads the menu into one JSON shape; code checks it, makes stable ids, converts prices to minor units, merges
+  pages in order with duplicates collapsed, maps add-ons to the extras library and proves the file with `parseCatalog` (D-092, D-094)
+- [x] A review list (to `--report` or the screen) of everything a person should check, with its file: no price, odd price,
+  unsure or unreadable names, duplicates, unknown tags and diets, add-ons offered nowhere, unread parts, categories with no
+  station; exit 1 only for no model, a model error or nothing usable, each saying expected, found and where
+- [x] Big menus split under a token budget, one call per photo, the call count printed (D-095); "Import a menu" in docs/configure.md
+- [ ] Lead: a real menu through a real vision model on an OpenAI-compatible endpoint, with what it taught in the field notes
+**Checkpoint:** unit tests against a fake model server: an image and a text input make a valid catalog; INR and a 3-decimal
+currency in minor units; duplicates merged across pages; add-ons mapped to extras; a priceless item in the report; HTML
+stripped in code; the failure messages; `npm run gate` green.
+
 ## Log
 - 2026-11-07 Started from the owner's earlier counter app, run live at a real tea-and-snack shop since 2025-12; rebuilt as open source (AGPL-3.0) on 2026-11-07.
 - 2026-11-07 M0 toolchain, .env.example, README stub; M1 core (config, routing, orders, tokens, batches, payments) and live-shop + 300-order rush fixtures, 47 tests green on a fresh clone; LICENSE still a placeholder awaiting the canonical AGPL text (32d9b86..d8035f8).
@@ -127,3 +219,12 @@ every station stream receives exactly its own items with no gaps after a forced 
 - 2026-11-11 M9 final review: start-up reads 3 rows at 90 days (was 24,717) through partial indexes, finished days read once and kept in memory with yesterday's per-minute record, recompute about 4.7 to 4.9 ms of workerd CPU at 15 and 90 days (was 13.4 to 14.5) (D-046).
 - 2026-11-11 M8 and M9 merged (merge commit 1976394): the look runs on Workers (bundled theme, strings and images, `/theme.css`, Appearance and the storefront figures through the Durable Object, image hosts in the policy; D-052), the cash/UPI split is aggregated in SQL, demo PINs sit on the redesigned PIN screen, token prefix visible, plural strings (D-053), a demo-only fixed clock for screenshots at 6:30 PM (D-054).
 - 2026-11-13 Published and live: public repo YoByron/ibow (AGPL-3.0, clean history; updates go out with scripts/release-sync.sh as ordinary commits), CI green on 1eb543d. The demo runs on the owner's own server as a systemd user service behind its own Cloudflare tunnel at https://ibow.saketposwal.com (showcase at /showcase), updated by a pull-based, CI-gated timer with smoke test and rollback; Workers stays documented as an option (the account's free quota is used up).
+- 2026-11-24 M10 items 1 to 7 and 9 done on branch feat/m10-ops: spots with QR cards, extras, line notes, per-item stations, runner screen and late alerts, ready-to-delivered minutes, tag filters, daily counts, last-order time, an invented garden-cafe sample with a 300-order rush; card payments and refunds not started; the private cafe config runs it (bd61760..HEAD, D-063 to D-069).
+- 2026-11-25 M12 items done, awaiting review: card as a staff-recorded method and refunds netted in every total (D-071, schema 16); line notes cleared with names and a station batch's spots and order numbers (D-073); owner, manager and system admin with one powers table, each with its own PIN, demo PINs for every level (D-072); the links hub at `/admin` (D-074), audited run-time flags (D-075, schema 17) and telemetry kept on the install (D-076, schema 18); reviewer's M10 should-fix and nits folded in; 637 unit + 31 browser tests green.
+- 2026-11-25 M11 and M13 (lead): drawn line icons, Fraunces display face, photo-only tiles and a Most loved strip (D-070); app shell with a CSS-only splash, view transitions, dialogs for paused ordering, sold-out and offline, order numbers (#47) and the name first (D-080); filters, staff tiles, item counts and the hub restyled; reviewer must-fixes (Workers noindex, Fraunces licence) done. Merged M10 and M12 from the builder. Still open: the owner approves screenshots; stations, runner, Appearance, Spots and Reviews screens not yet reviewed by eye. Commits feca73d..HEAD on feat/demo-config-folder.
+- 2026-11-25 Reviewer approved M12 and M13 (f03d1dc..a40de31) with no must-fix; Cloudflare facts checked against its docs (00:00 UTC row reset, 1 GB per object, 10 ms CPU, 4-hour browser TTL over no-cache, query strings in the cache key). Since: build-stamped asset URLs (D-081, 7a1c699), the hub's sign-in as level tiles with demo PINs (4b4976f, 963769c); the last screens checked by eye: order numbers on station chips, runner cards and the owner's orders, option lines above the count, Spots as a card per area, Appearance fitted to a phone, a seated guest told the order is on its way to the spot, owner screens shown only after sign-in; reviewer's should-fix and nits: test-results untracked, flags 401 before 404, a pre-D-072 staff id `admin` stops the boot loudly. Awaiting the owner's approval of screenshots.
+- 2026-11-25 M14 items done, awaiting review and the owner's screenshots: room zones and the room bill, unpaid until staff settle the room at checkout in one audited payment (D-082, schema 19), a Rooms screen (D-083), events with weekly repeats and an entry price in the store (D-084, schema 20), event banners on splash, cards and storefront with a CSS-only celebration (D-085), a demo whose day keeps going with room bills and events (D-086); 686 unit + 34 browser tests green (111eadc..HEAD).
+- 2026-11-25 Lead pass on M14 (merged bf04ccf): open room bills are owed at checkout and leave Awaiting confirmation (D-082 corrected while under review); Rooms settles with a confirm, whole amounts and one row of methods; event rows with readable dates and a confirm before delete; station tiles take their first category's icon; a room guest is asked about the room. Lead's storefront coherence pass (4f130e6) and closed days (D-090, 888e58e). Awaiting the reviewer and the owner's screenshots.
+- 2026-11-25 M15 items done, awaiting review and a real-model run: `src/ai` requests carry images as content parts (D-091); `npm run import-menu` reads photos, text, Markdown and HTML (stripped in code), refuses PDF (D-093), the model reads and code builds a catalog that `parseCatalog` loads, with minor units, stable ids, merged pages, extras and a review list (D-092, D-094), split under a token budget (D-095); 717 unit tests green (023d147..HEAD).
+- 2026-11-25 M14 review changes: only a room's own QR can charge it (HMAC key per room from a per-install secret, 403 room_key, keyed Spots print, demo keys at /api/demo), a wrong order can leave a room bill (audited, schema 21), closed days follow the business day past midnight and step by calendar day with a 409 that names them, events may end past midnight, Rooms redraws only for room-bill events, RENAME_ADMIN_STAFF (D-087), configure.md for rooms and events; D-082 to D-084 corrected; 704 unit + 34 browser tests green (5d1f5e6..HEAD).
+- 2026-11-25 Release review changes: a room key of the wrong shape is a 403, not a 500; New QR on Spots rotates one room's key (D-082 corrected); the storefront takes the key out of the address bar; import price strings with more than one number are odd and currency words are dropped, unsure items written switched off (D-092 corrected) (ac6804b..HEAD).

@@ -3,6 +3,7 @@
 import {
   EDIT_WINDOW_MS,
   isReady,
+  type LineExtra,
   type Order,
   type OrderLine,
   type OrderStatus,
@@ -28,11 +29,16 @@ export interface CustomerOrderView {
   createdAt: number;
   currency: string;
   customerName?: string;
+  spot?: string;
+  /** On the room bill: `open` until the room is settled at checkout, then `settled` (D-082). */
+  roomBill?: "open" | "settled";
   status: OrderStatus;
   lines: {
     itemId: string;
     name: string;
     size?: string;
+    extras?: LineExtra[];
+    note?: string;
     qty: number;
     unitMinor: number;
     served: boolean;
@@ -57,6 +63,7 @@ export interface StationOrderView {
   token: string;
   createdAt: number;
   customerName?: string;
+  spot?: string;
   status: OrderStatus;
   /** Only this station's lines; empty when an edit took its last line away. */
   lines: StationLine[];
@@ -78,6 +85,8 @@ export function customerView(order: Order): CustomerOrderView {
       itemId: l.itemId,
       name: l.name,
       ...(l.size === undefined ? {} : { size: l.size }),
+      ...(l.extras === undefined ? {} : { extras: l.extras }),
+      ...(l.note === undefined ? {} : { note: l.note }),
       qty: l.qty,
       unitMinor: l.unitMinor,
       served: l.served,
@@ -90,6 +99,8 @@ export function customerView(order: Order): CustomerOrderView {
       p.state === "unpaid" ? { state: "unpaid" } : { state: p.state, method: p.method, amountMinor: p.amountMinor },
   };
   if (order.customerName !== undefined) view.customerName = order.customerName;
+  if (order.spot !== undefined) view.spot = order.spot;
+  if (order.roomBill !== undefined) view.roomBill = order.roomBill.settlement === undefined ? "open" : "settled";
   if (order.status === "pending" && p.state === "unpaid") view.editableUntil = order.createdAt + EDIT_WINDOW_MS;
   return view;
 }
@@ -103,6 +114,7 @@ export function stationView(order: Order, stationId: string): StationOrderView {
     lines: order.lines.flatMap((l, index) => (l.stationId === stationId ? [{ ...l, index }] : [])),
   };
   if (order.customerName !== undefined) view.customerName = order.customerName;
+  if (order.spot !== undefined) view.spot = order.spot;
   return view;
 }
 

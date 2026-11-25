@@ -4,18 +4,23 @@
  * Its own bundle, so none of it reaches a customer's phone. Text only through the DOM helpers, never HTML strings.
  */
 
-import type { Category } from "../core/config.ts";
+import type { CalendarEvent } from "../core/calendar.ts";
+import type { Category, Zone } from "../core/config.ts";
 import type { Report } from "../core/insights.ts";
 import { formatPrice, formatWhole } from "../core/money.ts";
 import { nameKey } from "../core/regulars.ts";
 import { TINT_COUNT } from "../core/theme.ts";
-import { dayKey } from "../core/tokens.ts";
+import { dayKey, orderNumber } from "../core/tokens.ts";
 import type { StaffOrderView } from "../core/views.ts";
 import { ApiFailure, api } from "./api.ts";
 import { demoNote } from "./demo-note.ts";
 import { type Child, h, mount } from "./dom.ts";
+import { eventCardSlot, showSplashEvent } from "./events.ts";
+import { eventsBody } from "./events-editor.ts";
+import { te } from "./events-strings.ts";
 import { followStream, type OrderEvent } from "./live.ts";
 import { appearanceView } from "./owner-appearance.ts";
+import { spotsView } from "./owner-spots.ts";
 import { t, tn } from "./owner-strings.ts";
 import {
   axisTicks,
@@ -32,15 +37,21 @@ import { roundButton, button as uiButton } from "./ui/button.ts";
 import { appHeader } from "./ui/header.ts";
 import { icon } from "./ui/icon.ts";
 import { keypad } from "./ui/keypad.ts";
+import { transition, watchBoot } from "./ui/shell.ts";
 import { stat as uiStat } from "./ui/stat.ts";
 import { FALLBACK, initMode, loadThemeInfo, type ThemeInfo, toggleMode, watchTheme } from "./ui/theme-client.ts";
 
+watchBoot();
+showSplashEvent();
+
 interface OwnerCatalog {
+  left?: Record<string, number>;
   business: { name: string; currency: string; timeZone: string };
   categories: Category[];
+  zones?: Zone[];
 }
 
-type StaffRole = "counter" | "station" | "all";
+type StaffRole = "counter" | "station" | "all" | "manager";
 
 const root = document.getElementById("app") as HTMLElement;
 const locale = navigator.language;
@@ -96,6 +107,8 @@ function page(...children: Child[]): void {
     ["#/items", t("navItems"), "bento_box"],
     ["#/staff", t("navStaff"), "face_savoring_food"],
     ["#/reviews", t("navReviews"), "star"],
+    ["#/events", t("navEvents"), "party_popper"],
+    ...((catalog.zones?.length ?? 0) > 0 ? ([["#/spots", t("navSpots"), "ticket"]] as [string, string, string][]) : []),
     ["#/appearance", t("navAppearance"), "sparkles"],
   ];
   mount(
@@ -141,6 +154,7 @@ function failed(e: unknown): void {
 // ── Sign in ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 function loginView(): void {
+  signedIn = false;
   const error = h("p", { class: "error", role: "alert" });
   const pin = h("input", {
     name: "pin",
@@ -278,6 +292,13 @@ function chart(report: Report): HTMLElement {
   );
 }
 
+/** Today's ready-to-delivered waits, when staff have handed lines over: the minutes a ready dish stood before it was carried. */
+interface Carry {
+  lines: number;
+  averageMs: number;
+  maxMs: number;
+}
+
 function stat(
   label: string,
   value: string,
@@ -323,28 +344,37 @@ function changeChip(pct: number | null, say: (pct: string) => string): Child {
 /** The most prep lines shown at once; the list is most needed first, so the rest is the long tail. */
 const FORECAST_SHOWN = 12;
 
-function todayView(report: Report): void {
+function todayView(report: Report, carry?: Carry, rooms?: { open: number; totalMinor: number }): void {
   const c = report.comparison;
   const tot = report.totals;
   const f = report.forecast;
   const topQty = report.popular.byQty.slice(0, 5);
   const widest = topQty[0]?.qty || 1;
   const split =
-    tot.receivedCashMinor > 0 || tot.receivedUpiMinor > 0
-      ? t("cashUpi", { cash: money(tot.receivedCashMinor), upi: money(tot.receivedUpiMinor) })
+    tot.receivedCashMinor > 0 || tot.receivedUpiMinor > 0 || tot.receivedCardMinor > 0
+      ? tot.receivedCardMinor === 0
+        ? t("cashUpi", { cash: money(tot.receivedCashMinor), upi: money(tot.receivedUpiMinor) })
+        : t("cashUpiCard", {
+            cash: money(tot.receivedCashMinor),
+            upi: money(tot.receivedUpiMinor),
+            card: money(tot.receivedCardMinor),
+          })
       : undefined;
   const splitBar = h(
     "div",
     { class: "split", "aria-hidden": "true" },
     h("i", { class: "cash" }),
     h("i", { class: "upi" }),
+    h("i", { class: "card" }),
   );
-  const mixTotal = tot.receivedCashMinor + tot.receivedUpiMinor;
+  const mixTotal = tot.receivedCashMinor + tot.receivedUpiMinor + tot.receivedCardMinor;
   if (mixTotal > 0) {
     (splitBar.children[0] as HTMLElement).style.flexGrow = String(tot.receivedCashMinor);
     (splitBar.children[1] as HTMLElement).style.flexGrow = String(tot.receivedUpiMinor);
+    (splitBar.children[2] as HTMLElement).style.flexGrow = String(tot.receivedCardMinor);
   }
   page(
+    eventCardSlot(),
     h(
       "div",
       { class: "dash" },
@@ -404,6 +434,30 @@ function todayView(report: Report): void {
             ),
           ),
         ),
+        rooms !== undefined &&
+          h(
+            "div",
+            { class: "tile-wrap" },
+            stat(
+              t("statRoomBills"),
+              money(rooms.totalMinor),
+              "stat-room-bills",
+              undefined,
+              tn("roomBillsCount", rooms.open, { n: String(rooms.open) }),
+            ),
+          ),
+        carry !== undefined &&
+          h(
+            "div",
+            { class: "tile-wrap" },
+            stat(
+              t("statCarry"),
+              t("minutes", { n: (Math.round(carry.averageMs / 6000) / 10).toString() }),
+              "stat-carry",
+              carry.maxMs > 10 * 60_000 ? "warn" : undefined,
+              t("carrySub", { n: String(carry.lines), max: String(Math.round(carry.maxMs / 60_000)) }),
+            ),
+          ),
         chart(report),
         h(
           "section",
@@ -524,8 +578,11 @@ function todayView(report: Report): void {
 async function today(): Promise<void> {
   const gen = generation;
   const load = async () => {
-    const r = await api<{ report: Report }>("GET", "/api/owner/insights");
-    if (gen === generation) todayView(r.report);
+    const r = await api<{ report: Report; carry?: Carry; rooms?: { open: number; totalMinor: number } }>(
+      "GET",
+      "/api/owner/insights",
+    );
+    if (gen === generation) todayView(r.report, r.carry, r.rooms);
   };
   await load();
   // Numbers move during the day; five minutes is fresh enough, and only while the tab is in view (every refresh reads
@@ -573,7 +630,7 @@ async function orders(): Promise<void> {
       h(
         "div",
         { class: "card-head" },
-        h("span", { class: "token" }, o.token),
+        h("span", { class: "token" }, orderNumber(o.token)),
         h("span", {}, clock(o.createdAt)),
         o.customerName !== undefined && h("strong", {}, o.customerName),
         badge !== undefined && h("span", { class: "badge returning" }, badge),
@@ -653,6 +710,30 @@ async function orders(): Promise<void> {
 
 // ── Items ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** The Events tab: the business's events, for guests or staff only (D-084). */
+async function eventsTab(): Promise<void> {
+  const gen = generation;
+  const error = h("p", { class: "error", role: "alert" });
+  let editing: CalendarEvent | undefined;
+  const draw = async () => {
+    const body = await eventsBody(
+      catalog.business.currency,
+      () => void draw().catch(failed),
+      (e) => {
+        error.textContent = failureText(e);
+      },
+      error,
+      editing,
+      (e) => {
+        editing = e;
+        void draw().catch(failed);
+      },
+    );
+    if (gen === generation) page(h("h2", {}, te("eventsTitle")), h("p", { class: "muted" }, te("eventsSub")), ...body);
+  };
+  await draw();
+}
+
 async function items(): Promise<void> {
   const gen = generation;
   // Fresh, so a switch made on another device shows here.
@@ -691,6 +772,36 @@ async function items(): Promise<void> {
     });
     return b;
   };
+  /** A count for today, set each morning: it goes down with every order and sells the item out at zero. */
+  const counter = (item: Category["items"][number]) => {
+    const input = h("input", {
+      type: "number",
+      min: "0",
+      step: "1",
+      inputmode: "numeric",
+      class: "count",
+      placeholder: t("itemCountPlaceholder"),
+      "aria-label": t("itemCountLabel", { name: item.name }),
+      "data-count": item.id,
+      value: catalog.left?.[item.id] === undefined ? "" : String(catalog.left[item.id]),
+    }) as HTMLInputElement;
+    const set = h("button", { type: "button", "data-count-set": item.id }, t("itemCountSet"));
+    set.addEventListener("click", async () => {
+      set.disabled = true;
+      error.textContent = "";
+      try {
+        const text = input.value.trim();
+        await api("PUT", `/api/owner/items/${encodeURIComponent(item.id)}`, {
+          body: { count: text === "" ? null : Number(text) },
+        });
+      } catch (e) {
+        error.textContent = failureText(e);
+      } finally {
+        set.disabled = false;
+      }
+    });
+    return h("span", { class: "count-set" }, input, set);
+  };
   page(
     h("p", { class: "hint" }, t("itemsHint")),
     error,
@@ -703,7 +814,7 @@ async function items(): Promise<void> {
           "ul",
           { class: "plain switches" },
           ...c.items.map((item) =>
-            h("li", { class: "row" }, h("span", { class: "line-name" }, item.name), toggle(item)),
+            h("li", { class: "row" }, h("span", { class: "line-name" }, item.name), counter(item), toggle(item)),
           ),
         ),
       ),
@@ -714,6 +825,7 @@ async function items(): Promise<void> {
 // ── Staff ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 function roleText(role: StaffRole): string {
+  if (role === "manager") return t("roleManager");
   return role === "all" ? t("roleAll") : role === "counter" ? t("roleCounter") : t("roleStation");
 }
 
@@ -741,7 +853,7 @@ async function staff(): Promise<void> {
   const role = h(
     "select",
     { name: "role" },
-    ...(["all", "counter", "station"] as const).map((r) => h("option", { value: r }, roleText(r))),
+    ...(["all", "counter", "station", "manager"] as const).map((r) => h("option", { value: r }, roleText(r))),
   );
   const form = h(
     "form",
@@ -858,9 +970,13 @@ function route(): void {
           ? staff()
           : hash === "#/reviews"
             ? reviews()
-            : hash === "#/appearance"
-              ? appearanceView(page, failureText)
-              : today();
+            : hash === "#/events"
+              ? eventsTab()
+              : hash === "#/spots"
+                ? spotsView(page, catalog.business.name, catalog.zones ?? [], t)
+                : hash === "#/appearance"
+                  ? appearanceView(page, failureText)
+                  : today();
   run.catch(failed);
 }
 
@@ -877,6 +993,7 @@ async function start(): Promise<void> {
     try {
       const me = await api<{ role: string }>("GET", "/api/me");
       if (me.role !== "owner") return loginView();
+      signedIn = true;
     } catch (e) {
       if (e instanceof ApiFailure && e.status === 401) return loginView();
       throw e;
@@ -891,5 +1008,9 @@ async function start(): Promise<void> {
   }
 }
 
-window.addEventListener("hashchange", route);
+/** Set once `/api/me` says owner: until then a link to a screen (`#/spots`) shows the PIN, not the screen. */
+let signedIn = false;
+window.addEventListener("hashchange", () => {
+  if (signedIn) transition(() => route());
+});
 void start();

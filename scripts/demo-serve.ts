@@ -1,5 +1,5 @@
 // The demo as a long-running service (docs/install.md, "Your own server with Cloudflare Tunnel"):
-//   node scripts/demo-serve.ts --data ~/apps/ibow/data --host 127.0.0.1 --port 8790
+//   node scripts/demo-serve.ts --data ~/apps/ibow/data --host 127.0.0.1 --port 8790 [--sample coffee-cart | --sample ~/my-config]
 // Unlike `npm run demo` it keeps its database between runs. A new or empty data directory is seeded once; every later start
 // reuses the database and the same throwaway PINs (kept in demo-pins.json beside it). A real install's database is
 // refused. The analyst is off, the showcase is on (it is a demo), and TRUST_PROXY comes from the environment.
@@ -10,13 +10,14 @@ import { fileURLToPath } from "node:url";
 import { DEMO_PINS_ENV, DEMO_VPA, type DemoPins } from "../src/demo/pins.ts";
 import { databaseKind } from "../src/store/node.ts";
 import { buildClient } from "./build-client.ts";
-import { freePort, portFree, prepareDemo } from "./demo.ts";
+import { demoConfigDir, freePort, isConfigPath, portFree, prepareDemo } from "./demo.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 
 interface SavedPins {
   pins: DemoPins;
   ownerPinHash: string;
+  adminPinHash: string;
   sample: string;
 }
 
@@ -35,7 +36,16 @@ function readSaved(path: string): SavedPins | undefined {
     const saved = JSON.parse(readFileSync(path, "utf8")) as Partial<SavedPins>;
     const ok = (v: unknown) => typeof v === "string" && /^\d{4,12}$/.test(v);
     const p = saved.pins;
-    if (p && ok(p.owner) && ok(p.counter) && ok(p.station) && typeof saved.ownerPinHash === "string") {
+    if (
+      p &&
+      ok(p.owner) &&
+      ok(p.counter) &&
+      ok(p.station) &&
+      ok(p.manager) &&
+      ok(p.admin) &&
+      typeof saved.ownerPinHash === "string" &&
+      typeof saved.adminPinHash === "string"
+    ) {
       return saved as SavedPins;
     }
   } catch {}
@@ -71,11 +81,17 @@ export async function serveDemo(opts: {
   const seeded = saved === undefined;
   if (saved === undefined) {
     const prepared = await prepareDemo({ sample, dataDir, now: Date.now() });
-    saved = { pins: prepared.pins, ownerPinHash: prepared.ownerPinHash, sample };
+    // a sample by name stays a name; a folder is kept as its full path, so a later start finds it from anywhere
+    saved = {
+      pins: prepared.pins,
+      ownerPinHash: prepared.ownerPinHash,
+      adminPinHash: prepared.adminPinHash,
+      sample: isConfigPath(sample) ? prepared.configDir : sample,
+    };
     writeFileSync(`${pinsPath}.tmp`, `${JSON.stringify(saved)}\n`, { mode: 0o600 });
     renameSync(`${pinsPath}.tmp`, pinsPath);
   }
-  const configDir = join(root, "samples", saved.sample);
+  const configDir = demoConfigDir(saved.sample);
   if (!existsSync(join(root, "dist/client/index.html"))) {
     const log = console.log;
     if (opts.quiet) console.log = () => {};
@@ -100,6 +116,7 @@ export async function serveDemo(opts: {
         HOST: host,
         TRUST_PROXY: opts.env?.TRUST_PROXY ?? "0",
         OWNER_PIN_HASH: saved.ownerPinHash,
+        ADMIN_PIN_HASH: saved.adminPinHash,
         [DEMO_PINS_ENV]: JSON.stringify(saved.pins),
         UPI_VPA: DEMO_VPA,
       },

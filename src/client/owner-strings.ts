@@ -4,6 +4,7 @@
  */
 
 import { type Pluralised, pluralKey } from "../core/plural.ts";
+import { orderNumber, orderNumbers } from "../core/tokens.ts";
 
 export const ownerEn = {
   ownerTitle: "Owner",
@@ -27,6 +28,22 @@ export const ownerEn = {
   navItems: "Items",
   navStaff: "Staff",
   navReviews: "Reviews",
+  navEvents: "Events",
+  statRoomBills: "Open room bills",
+  roomBillsCount: "{n} orders, paid at checkout",
+  roomBillsCount_one: "{n} order, paid at checkout",
+  navSpots: "Spots",
+  spotsNone: "No spots are set up. Add a spots.json to the config folder to give each table a QR code.",
+  spotsHint:
+    "Print a QR for each spot. Scanning it opens the menu with that spot chosen, so staff know where to bring the order.",
+  spotsPrint: "Print all {n} QR cards",
+  spotScan: "Scan to order",
+  spotNewQr: "New QR",
+  spotNewQrTitle: "New QR for {room}?",
+  spotNewQrBody:
+    "The QR in this room stops working at once, so a guest who has checked out can't put orders on the bill with a photo of it. Print the new card and replace the old one.",
+  spotNewQrConfirm: "Make a new QR",
+  spotNewQrCancel: "Keep the old one",
   navAppearance: "Appearance",
 
   // Today
@@ -50,6 +67,12 @@ export const ownerEn = {
   statOrdered: "Ordered",
   statReceived: "Received",
   statAwaiting: "Awaiting confirmation",
+  itemCountLabel: "Count for {name}",
+  itemCountPlaceholder: "Left today",
+  itemCountSet: "Set",
+  statCarry: "Ready to delivered",
+  minutes: "{n} min",
+  carrySub: "longest {max} min; {n} handed over",
   chartTitle: "Orders by hour",
   peakPill: "Peak {hour} · {orders}",
   topItems: "Top items",
@@ -64,6 +87,7 @@ export const ownerEn = {
   yesterdayWhole: "Yesterday, whole day: {orders} orders, {amount}",
   yesterdayWhole_one: "Yesterday, whole day: {orders} order, {amount}",
   cashUpi: "{cash} cash · {upi} UPI",
+  cashUpiCard: "{cash} cash · {upi} UPI · {card} card",
   awaitingCount: "{n} orders to match",
   awaitingCount_one: "{n} order to match",
   review: "Review",
@@ -107,6 +131,7 @@ export const ownerEn = {
   roleAll: "Counter and stations",
   roleCounter: "Counter",
   roleStation: "Stations only",
+  roleManager: "Manager (menu, refunds, every staff screen)",
   saveStaff: "Save",
   editStaff: "Edit {name}",
   staffLine: "{name} ({id}) · {role}",
@@ -116,7 +141,7 @@ export const ownerEn = {
   reviewAverage: "{average} out of 5 from the latest {count} reviews",
   reviewAverage_one: "{average} out of 5 from the latest review",
   reviewStars: "{rating} out of 5",
-  reviewToken: "Token {token} · {date}",
+  reviewToken: "Order {token} · {date}",
 
   // Appearance
   appearanceHint:
@@ -179,7 +204,18 @@ export const ownerEn = {
 export type OwnerStringKey = keyof typeof ownerEn;
 
 /** The string for `key` with `{placeholders}` filled; an unknown placeholder stays visible rather than vanishing. */
+/** `{token}` and `{tokens}` in any label read as order numbers ("#47"), never as the stored `25-047` (M13). */
+function readable(vars: Readonly<Record<string, string>>): Readonly<Record<string, string>> {
+  if (vars.token === undefined && vars.tokens === undefined) return vars;
+  return {
+    ...vars,
+    ...(vars.token === undefined ? {} : { token: orderNumber(vars.token) }),
+    ...(vars.tokens === undefined ? {} : { tokens: orderNumbers(vars.tokens) }),
+  };
+}
+
 export function t(key: OwnerStringKey, vars: Readonly<Record<string, string>> = {}): string {
+  vars = readable(vars);
   return (ownerEn[key] as string).replace(/\{(\w+)\}/g, (whole, name: string) => vars[name] ?? whole);
 }
 

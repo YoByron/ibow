@@ -18,6 +18,7 @@ command = "node scripts/bundle-look.ts samples/tea-house dist/look-demo.json && 
 ibow-business = "./samples/tea-house/business.json"
 ibow-catalog = "./samples/tea-house/catalog.json"
 ibow-stations = "./samples/tea-house/stations.json"
+ibow-spots = "./src/worker/no-spots.json"
 ibow-look = "./dist/look-demo.json"
 ibow-rush = "./samples/tea-house/rush.json"
 ibow-demo-bundle = "./src/worker/demo-bundle.json"

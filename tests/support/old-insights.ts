@@ -89,6 +89,7 @@ export interface DayTotals {
   receivedMinor: number;
   receivedCashMinor: number;
   receivedUpiMinor: number;
+  receivedCardMinor: number;
   /** Orders placed in the day whose confirmed money doesn't cover them yet, and what they still owe. */
   awaitingOrders: number;
   awaitingMinor: number;
@@ -235,6 +236,7 @@ export function dayTotals(sales: readonly Sale[], day: string, timeZone: string,
     receivedMinor,
     receivedCashMinor,
     receivedUpiMinor,
+    receivedCardMinor: 0,
     awaitingOrders,
     awaitingMinor,
   };

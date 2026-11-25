@@ -4,6 +4,7 @@
  */
 
 import { expect, test } from "@playwright/test";
+import { orderNumber } from "../src/core/tokens.ts";
 import { addSized } from "./helpers.ts";
 import { type RunningServer, startServer } from "./server.ts";
 
@@ -43,18 +44,18 @@ test("a customer orders a size with a name, edits in the window, pays by UPI and
   const cartBar = page.getByTestId("cart-bar");
   await expect(cartBar).toContainText("₹30");
   await cartBar.click();
-  await page.getByLabel("Your name (optional)").fill("Asha");
+  await page.getByLabel("What's your name?").fill("Asha");
   const stream = page.waitForRequest(/\/api\/stream\/order\//);
   await page.getByRole("button", { name: "Place order" }).click();
 
   const token = page.getByTestId("token");
   const status = page.getByTestId("status");
-  await expect(token).toHaveText(/^\d{2}-001$/);
-  const tokenText = (await token.textContent()) as string;
-  // The day prefix is small and the number large, both painted: the number's gradient text would swallow a prefix that
+  await expect(token).toHaveText("#1");
+  const tokenText = (await token.getAttribute("data-token")) as string;
+  // The "#" is small and the number large, both painted: the number's gradient text would swallow a prefix that
   // is its own layer (opacity) or transparent, so the prefix must carry its own opaque fill.
   const prefix = token.locator("small");
-  await expect(prefix).toHaveText(/^\d{2}-$/);
+  await expect(prefix).toHaveText("#");
   const painted = await prefix.evaluate((el) => {
     const c = getComputedStyle(el);
     return { opacity: c.opacity, fill: c.webkitTextFillColor, size: Number.parseFloat(c.fontSize) };
@@ -64,7 +65,7 @@ test("a customer orders a size with a name, edits in the window, pays by UPI and
   expect(painted.fill).not.toMatch(/rgba\(\d+, \d+, \d+, 0\)|transparent/);
   expect(painted.size).toBeLessThan(numberSize / 2);
   await expect(status).toHaveText("Order placed");
-  await expect(page.getByText("For Asha")).toBeVisible();
+  await expect(page.getByTestId("order-name")).toHaveText("Asha");
   const upi = page.getByRole("link", { name: "Open a UPI app" });
   await expect(upi).toHaveAttribute(
     "href",
@@ -77,7 +78,7 @@ test("a customer orders a size with a name, edits in the window, pays by UPI and
 
   // Edit within the 2-minute window, before claiming payment: a claimed payment ends edits (D-007).
   await page.getByRole("button", { name: /^Change order \(\d:\d\d left\)$/ }).click();
-  await expect(page.getByText(`Changing order ${tokenText}.`)).toBeVisible();
+  await expect(page.getByText(`Changing order ${orderNumber(tokenText)}.`)).toBeVisible();
   await page.getByRole("searchbox").fill("momos");
   await page.getByRole("button", { name: "Add Veg Momos S/F" }).click();
   await cartBar.click();
@@ -119,8 +120,8 @@ test("a customer orders a size with a name, edits in the window, pays by UPI and
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText("Thanks for your review!")).toBeVisible();
 
-  await page.getByRole("link", { name: "Find my token" }).click();
-  await page.getByLabel("Token number").fill(tokenText);
+  await page.getByRole("link", { name: "Find my order" }).click();
+  await page.getByLabel("Order number").fill(tokenText);
   await page.getByRole("button", { name: "Check" }).click();
   await expect(page.getByRole("status")).toContainText("Ready! Please collect it.");
 });
@@ -149,17 +150,17 @@ test("kiosk mode takes an order without a name, shows the token big, then resets
   server = await startServer("coffee-cart");
   await page.goto(`${server.base}/?kiosk=1&reset=3`);
   await expect(page.locator("body")).toHaveClass(/kiosk/);
-  await expect(page.getByRole("link", { name: "Find my token" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Find my order" })).toHaveCount(0);
 
   await addSized(page, "Espresso", "S");
   const cartBar = page.getByTestId("cart-bar");
   await expect(cartBar).toContainText("$3");
   await cartBar.click();
-  await expect(page.getByLabel("Your name (optional)")).toHaveCount(0);
+  await expect(page.getByLabel("What's your name?")).toHaveCount(0);
   await page.getByRole("button", { name: "Place order" }).click();
 
   const token = page.getByTestId("token");
-  await expect(token).toHaveText(/^\d{2}-001$/);
+  await expect(token).toHaveText("#1");
   await expect(token).toHaveClass(/huge/);
   await expect(page.getByText("Please pay $3 at the counter.")).toBeVisible();
   await expect(page.getByRole("img", { name: /UPI/ })).toHaveCount(0);
@@ -180,7 +181,7 @@ test("kiosk mode takes an order without a name, shows the token big, then resets
   await addSized(page, "Latte", "M");
   await cartBar.click();
   await page.getByRole("button", { name: "Place order" }).click();
-  await expect(token).toHaveText(/^\d{2}-002$/);
+  await expect(token).toHaveText("#2");
 });
 
 test("a kiosk left mid-order resets after the idle time, and back doesn't bring the cart back", async ({ page }) => {

@@ -22,6 +22,7 @@ command = "node scripts/bundle-look.ts config dist/look.json && npm run build --
 ibow-business = "./config/business.json"
 ibow-catalog = "./config/catalog.json"
 ibow-stations = "./config/stations.json"
+ibow-spots = "./config/spots.json"
 ibow-look = "./dist/look.json"
 ibow-rush = "./src/worker/no-rush.json"
 ibow-demo-bundle = "./src/worker/no-demo-bundle.json"

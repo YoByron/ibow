@@ -6,6 +6,7 @@
 
 import { type Browser, type BrowserContext, expect, type Page, test } from "@playwright/test";
 import { BATCH_TEMPLATES, type BatchTemplate, openBatch, renderBatch } from "../src/core/batches.ts";
+import { orderNumber } from "../src/core/tokens.ts";
 import type { StaffOrderView } from "../src/core/views.ts";
 import { addSized } from "./helpers.ts";
 import { OWNER_PIN, type RunningServer, startServer } from "./server.ts";
@@ -125,7 +126,7 @@ test("a staged rush: counter, tea and kitchen stations, ten customers, a walk-in
     else await customer.getByRole("button", { name: "Add Veg Momos S/F" }).click();
     await customer.getByTestId("cart-bar").click();
     await customer.getByRole("button", { name: "Place order" }).click();
-    await expect(customer.getByTestId("token")).toHaveText(/^\d{2}-\d{3}$/);
+    await expect(customer.getByTestId("token")).toHaveText(/^#\d+$/);
   }
   const customerToken = (await customer.getByTestId("token").textContent()) as string;
   await expect(counter.getByRole("button", { name: "Pending 10" })).toBeVisible();
@@ -164,13 +165,13 @@ test("a staged rush: counter, tea and kitchen stations, ten customers, a walk-in
   expect(open).toHaveLength(11);
   const teaText = renderBatch(openBatch(open, "tea"), en);
   const kitchenText = renderBatch(openBatch(open, "kitchen"), en);
-  expect(teaText).toMatch(/^Tokens .* 5 House Special Chai M, /);
+  expect(teaText).toMatch(/^Orders .* 5 House Special Chai M, /);
   // The screen groups by item with a row per size, a count and the tokens, and reads the batch in a bar below.
   const chaiGroup = tea.getByTestId("item-house-special-chai");
   await expect(chaiGroup.getByRole("heading", { name: "House Special Chai" })).toBeVisible();
   await expect(chaiGroup.locator(".brows li").first().locator(".count")).toContainText("5");
-  await expect(chaiGroup.locator(".brows li").first().locator(".chips i").first()).toHaveText(/^\d{3}$/);
-  await expect(tea.getByTestId("reading")).toContainText(/^Reading: Tokens .* · 5 House Special Chai M, /);
+  await expect(chaiGroup.locator(".brows li").first().locator(".chips i").first()).toHaveText(/^#\d+$/);
+  await expect(tea.getByTestId("reading")).toContainText(/^Reading: Orders .* · 5 House Special Chai M, /);
   await expect(tea.getByTestId("batch-text")).toHaveText(teaText);
   await expect(kitchen.getByTestId("batch-text")).toHaveText(kitchenText);
   await expect(kitchen.getByTestId("batch-text")).not.toContainText("Chai");
@@ -207,9 +208,11 @@ test("a staged rush: counter, tea and kitchen stations, ten customers, a walk-in
 
   // The counter calls a token out loud.
   await card(placed[0]?.token as string)
-    .getByRole("button", { name: "Call token" })
+    .getByRole("button", { name: "Call order" })
     .click();
-  await expect.poll(async () => (await spoken(counter)).at(-1)).toBe(`Token ${placed[0]?.token}, your order is ready.`);
+  await expect
+    .poll(async () => (await spoken(counter)).at(-1))
+    .toBe(`Order ${orderNumber(placed[0]?.token as string)}, your order is ready.`);
 
   // Items added to a paid order: the counter takes the extra amount and the order owes nothing again.
   await card(placed[0]?.token as string)
@@ -217,14 +220,16 @@ test("a staged rush: counter, tea and kitchen stations, ten customers, a walk-in
     .click();
   await counter.getByRole("button", { name: "Add Salted Fries" }).click();
   await counter
-    .getByRole("button", { name: `Add to ${placed[0]?.token}` })
+    .getByRole("button", { name: `Add to ${orderNumber(placed[0]?.token as string)}` })
     .last()
     .click();
   // The added line isn't ready, so the order is back with the kitchen and in Pending.
   await counter.getByRole("button", { name: /^Pending / }).click();
   const topped = card(placed[0]?.token as string);
   await expect(topped.getByText("Added items: take ₹60 more")).toBeVisible();
-  await expect(kitchen.getByTestId("batch-text")).toHaveText(`Tokens ${placed[0]?.token} 1 Salted Fries`);
+  await expect(kitchen.getByTestId("batch-text")).toHaveText(
+    `Orders ${orderNumber(placed[0]?.token ?? "")} 1 Salted Fries`,
+  );
   await topped.getByRole("button", { name: "Cash", exact: true }).click();
   await topped.getByRole("button", { name: "Cash received: ₹60" }).click();
   await expect(topped.getByText("Paid ₹120")).toBeVisible();
@@ -241,7 +246,7 @@ test("a staged rush: counter, tea and kitchen stations, ten customers, a walk-in
   await expect(ticket).toBeVisible();
   await expect(kitchen.locator("#app")).toBeHidden();
   await expect(ticket).toContainText("The Tea House");
-  await expect(ticket).toContainText(`Token ${placed[0]?.token}`);
+  await expect(ticket).toContainText(`Order ${orderNumber(placed[0]?.token as string)}`);
   await expect(ticket).toContainText("Kitchen");
   await expect(ticket).toContainText("1 ×Salted Fries");
   const width = await kitchen.locator("#print").evaluate((el) => el.getBoundingClientRect().width);
@@ -300,8 +305,8 @@ test("a jobs station shows one card per customer's job, speaks each arrival and 
   await expect
     .poll(() => spoken(bench))
     .toEqual([
-      `New job, token ${a.token}: 1 × Screen Replacement (Standard)`,
-      `New job, token ${b.token}: 1 × Water Damage Check, 1 × Battery Replacement (Express)`,
+      `New job, order ${orderNumber(a.token)}: 1 × Screen Replacement (Standard)`,
+      `New job, order ${orderNumber(b.token)}: 1 × Water Damage Check, 1 × Battery Replacement (Express)`,
     ]);
 
   await jobB.getByRole("button", { name: "Print ticket" }).click();

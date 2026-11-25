@@ -1,0 +1,100 @@
+/*
+ * The app shell (M13): splash screen, dialogs, screen transitions and the small things that make a web page feel like an
+ * app on a phone. Every colour is a token from /theme.css; the splash takes the business's name and mark from there too.
+ */
+
+/* ---- native feel ---- */
+html{overscroll-behavior-y:none;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{overscroll-behavior-y:none}
+button,a,.pill,.tab,.add,.opt,.fcard,.key,.chip{-webkit-user-select:none;user-select:none;touch-action:manipulation}
+.hdr{padding-top:calc(var(--sp-4) + env(safe-area-inset-top))}
+.hdr[data-style=awning]{padding-top:calc(44px + env(safe-area-inset-top))}
+.hdr .awning-wrap{top:env(safe-area-inset-top)}
+@supports (padding:max(0px)){.page,.rail,.feat{padding-left:max(var(--sp-4),env(safe-area-inset-left));padding-right:max(var(--sp-4),env(safe-area-inset-right))}}
+input,textarea,select{font-size:max(16px,1em)}
+
+/* ---- splash ---- */
+.splash{position:fixed;inset:0;z-index:100;display:grid;place-items:center;color:var(--on-hdr);
+  background:radial-gradient(120% 80% at 50% 30%,var(--hdr-b),var(--hdr-a) 70%);transition:opacity .45s var(--ease),visibility .45s}
+.booted .splash{opacity:0;visibility:hidden;pointer-events:none}
+.splash-in{display:flex;flex-direction:column;align-items:center;gap:18px;padding:24px}
+.splash-mark{display:var(--brand-mark-d,block);width:96px;height:96px;border-radius:28px;background:rgba(255,255,255,.08) var(--brand-mark,none) center/62% no-repeat;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.16),0 20px 50px rgba(0,0,0,.25)}
+.splash-name{font-family:var(--font-display);font-size:26px;font-weight:600;letter-spacing:-.01em;text-align:center;max-width:16em}
+.splash-name:after{content:var(--brand-name,"")}
+.splash-bar{width:72px;height:3px;border-radius:3px;background:rgba(255,255,255,.18);overflow:hidden}
+.splash-bar i{display:block;width:40%;height:100%;border-radius:inherit;background:var(--accent)}
+@media (prefers-reduced-motion:no-preference){
+  .splash-mark{animation:splash-mark .9s var(--ease) both}
+  .splash-name{animation:splash-rise .7s .18s var(--ease) both}
+  .splash-bar{animation:splash-rise .6s .3s var(--ease) both}
+  .splash-bar i{animation:splash-load 1.1s .4s ease-in-out infinite}
+  .booted .splash-in{transform:scale(1.04);transition:transform .45s var(--ease)}
+}
+@keyframes splash-mark{from{opacity:0;transform:scale(.82)}to{opacity:1;transform:none}}
+@keyframes splash-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes splash-load{0%{transform:translateX(-110%)}100%{transform:translateX(260%)}}
+
+/* ---- dialog ---- */
+.dlg{margin:auto;border:0;padding:0;background:none;color:var(--ink);max-width:min(400px,calc(100vw - 32px));width:100%;overflow:visible}
+.dlg::backdrop{background:var(--scrim);backdrop-filter:blur(2px)}
+.dlg-in{background:var(--card);border-radius:var(--r-sheet);box-shadow:var(--sh-3);padding:28px 22px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px}
+.dlg-ic{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;font-size:32px;color:var(--primary-text);background:var(--primary-soft);margin-bottom:4px;--ic-fill:var(--accent);--ic-fo:.4}
+.dlg.warn .dlg-ic{color:var(--warn-text);background:var(--warn-soft)}
+.dlg h2{font-size:22px;line-height:1.2}
+.dlg-body{color:var(--ink-2);font-size:15px;line-height:1.5}
+.dlg-body p+p{margin-top:6px}
+.dlg-acts{display:flex;flex-direction:column;gap:10px;width:100%;margin-top:12px}
+@media (prefers-reduced-motion:no-preference){
+  .dlg[open] .dlg-in{animation:dlg-in .32s var(--ease)}
+  .dlg[open]::backdrop{animation:fadeIn .25s ease}
+}
+@keyframes dlg-in{from{opacity:0;transform:translateY(14px) scale(.97)}to{opacity:1;transform:none}}
+
+/* ---- status banner (ordering paused, offline) ---- */
+.notice{display:flex;align-items:center;gap:10px;margin:var(--sp-3) var(--sp-4) 0;padding:10px 14px;border-radius:var(--r-panel);background:var(--warn-soft);color:var(--ink);font-size:13.5px;line-height:1.35}
+.notice .em{font-size:20px;color:var(--warn-text);flex:none}
+.notice b{font-weight:650}
+
+/* ---- diet filters: a compact second row under the categories, not a second sticky rail ---- */
+.rail.filters{position:static;border-bottom:0;padding-top:0;padding-bottom:var(--sp-2);gap:6px;align-items:center;background:none}
+.rail.filters .pill{min-height:32px;padding:0 12px;font-size:12.5px;gap:5px}
+.rail.filters small{flex:none;white-space:nowrap;font-size:11.5px;padding-left:4px}
+
+/* ---- form controls: one look for every input, select and textarea ---- */
+.field select,select.field-select{min-height:var(--ctl-h);padding:0 40px 0 14px;border-radius:var(--r-ctl);border:1.5px solid var(--line);font-weight:500;color:var(--ink);
+  -webkit-appearance:none;appearance:none;background:var(--card) no-repeat right 14px center/14px 14px;
+  background-image:linear-gradient(45deg,transparent 50%,var(--ink-3) 50%),linear-gradient(-45deg,transparent 50%,var(--ink-3) 50%);
+  background-size:6px 6px,6px 6px;background-position:calc(100% - 20px) 55%,calc(100% - 14px) 55%}
+.field select:focus{outline:3px solid var(--accent);border-color:transparent}
+.note-input{width:100%;margin-top:6px;min-height:34px;padding:4px 10px;border-radius:var(--r-ctl);border:1px dashed var(--line);background:transparent;font-size:16px;color:var(--ink)}
+.note-input::placeholder{color:var(--ink-3)}
+.note-input:focus{outline:2px solid var(--accent);border-style:solid;background:var(--card)}
+.pairs .btn{font-size:14px;line-height:1.2;padding:0 12px}
+
+/* ---- owner Items: name on its own line, then the day's count and the on/off switch in one tidy row ---- */
+li.row:has(.count-set){display:grid;grid-template-columns:1fr auto;grid-template-areas:"name name" "count toggle";gap:8px 10px;padding:12px 0}
+li.row:has(.count-set) .line-name{grid-area:name;font-size:15px}
+li.row .count-set{grid-area:count;display:flex;gap:6px;align-items:center;min-width:0}
+li.row .count-set input.count{width:108px;min-height:40px;padding:0 10px;border-radius:var(--r-ctl);border:1.5px solid var(--line);background:var(--card);color:var(--ink);font-size:16px;font-variant-numeric:tabular-nums}
+li.row .count-set input.count::placeholder{color:var(--ink-3);font-size:13px}
+li.row .count-set button{min-height:40px;padding:0 14px;border-radius:var(--r-ctl);background:var(--card-2);color:var(--ink);font-weight:650;font-size:14px}
+li.row:has(.count-set)>button,li.row:has(.count-set)>:last-child{grid-area:toggle;justify-self:end}
+
+/* ---- the customer's name: asked first, shown large ---- */
+.name-card .field{gap:8px}
+.name-q{display:flex;align-items:center;gap:8px;font-family:var(--font-display);font-size:18px;font-weight:600}
+.name-q .em{font-size:22px;color:var(--primary-text)}
+.name-card input{font-size:18px;min-height:50px}
+.ticket .who{font-family:var(--font-display);font-size:24px;font-weight:600;margin-top:4px;color:var(--ink);overflow-wrap:anywhere}
+
+/* ---- screen transitions (where the browser has view transitions) ---- */
+/* No cross-document @view-transition: after a back navigation and a reload (the kiosk reset) it left the page stuck
+   mid-transition, so controls never became clickable. Screens inside one page still transition. */
+.tabs{view-transition-name:tabbar}
+@media (prefers-reduced-motion:no-preference){
+  ::view-transition-old(root){animation:.16s ease-out both vt-out}
+  ::view-transition-new(root){animation:.26s var(--ease) both vt-in}
+}
+@keyframes vt-out{to{opacity:0}}
+@keyframes vt-in{from{opacity:0;transform:translateY(8px)}}

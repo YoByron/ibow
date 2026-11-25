@@ -73,6 +73,7 @@ describe("insights", () => {
       receivedMinor: 0,
       receivedCashMinor: 0,
       receivedUpiMinor: 0,
+      receivedCardMinor: 0,
       awaitingOrders: 0,
       awaitingMinor: 0,
     });
@@ -118,6 +119,7 @@ describe("insights", () => {
       receivedMinor: 3000 + 3000 + 6000, // cash, the late one, the topped-up one; never the claim
       receivedCashMinor: 3000 + 3000 + 6000,
       receivedUpiMinor: 0,
+      receivedCardMinor: 0,
       awaitingOrders: 2,
       awaitingMinor: 3000 + 6000,
     });
@@ -141,6 +143,7 @@ describe("insights", () => {
       receivedMinor: 13_900,
       receivedCashMinor: 6000,
       receivedUpiMinor: 7000,
+      receivedCardMinor: 0,
     });
   });
 

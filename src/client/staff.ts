@@ -11,34 +11,48 @@ import {
   openBatch,
   renderBatch,
 } from "../core/batches.ts";
+import type { CalendarEvent } from "../core/calendar.ts";
 import type { CatalogItem, StationView } from "../core/config.ts";
 import { formatMoney, formatPrice } from "../core/money.ts";
-import { isReady, UNDO_WINDOW_MS } from "../core/orders.ts";
+import { isReady, onOpenRoomBill, UNDO_WINDOW_MS } from "../core/orders.ts";
 import type { PaymentMethod } from "../core/payments.ts";
+import { type RunnerOrder, runnerOrders } from "../core/runner.ts";
+import { orderNumber, orderNumbers } from "../core/tokens.ts";
 import type { StaffOrderView, StationLine, StationOrderView } from "../core/views.ts";
 import { announce, primeSound } from "./alerts.ts";
-import { ApiFailure, api } from "./api.ts";
+import { ApiFailure, api, serverNow } from "./api.ts";
 import { addOne, type Cart, cartTotal, itemCount, qtyOf, setQty } from "./cart.ts";
 import { cashOptions, changeDue } from "./cash.ts";
-import { findItem, priceOf, type StoreCatalog, visibleCategories } from "./catalog.ts";
+import { extraGroupsOf, extraOptions, findItem, priceOfLine, type StoreCatalog, visibleCategories } from "./catalog.ts";
 import { demoNote } from "./demo-note.ts";
 import { type Child, h, mount } from "./dom.ts";
+import { eventCardSlot, reloadEvents, showSplashEvent } from "./events.ts";
+import { eventsBody } from "./events-editor.ts";
+import { te } from "./events-strings.ts";
 import { followStream, type OrderEvent } from "./live.ts";
+import { openOptions } from "./options-sheet.ts";
 import { printTickets, type Ticket } from "./print.ts";
 import { qrSvg } from "./qr.ts";
 import { newClientKey, tabStore } from "./session.ts";
+import { managerBody } from "./staff-manager.ts";
+import { refundBlock } from "./staff-refund.ts";
+import { roomsBody } from "./staff-rooms.ts";
 import { t } from "./staff-strings.ts";
 import { lang } from "./strings.ts";
 import { roundButton, button as uiButton } from "./ui/button.ts";
 import { appHeader } from "./ui/header.ts";
 import { icon, iconRef } from "./ui/icon.ts";
 import { keypad } from "./ui/keypad.ts";
+import { transition, watchBoot } from "./ui/shell.ts";
 import { stat } from "./ui/stat.ts";
 import { FALLBACK, initMode, loadThemeInfo, type ThemeInfo, toggleMode, watchTheme } from "./ui/theme-client.ts";
 import { browserVoice } from "./voice.ts";
 
+watchBoot();
+showSplashEvent();
+
 interface StaffCatalog extends StoreCatalog {
-  business: StoreCatalog["business"] & { timeZone: string; cashShortcutsMinor?: number[] };
+  business: StoreCatalog["business"] & { timeZone: string; lateMinutes: number; cashShortcutsMinor?: number[] };
 }
 
 interface StationInfo {
@@ -47,6 +61,8 @@ interface StationInfo {
   view: StationView;
   speak: boolean;
   print: "ticket-80mm" | null;
+  /** The categories it makes, in order: the first one's icon stands for the station on its tile. */
+  categories?: string[];
 }
 
 const root = document.getElementById("app") as HTMLElement;
@@ -60,6 +76,10 @@ let theme: ThemeInfo = FALLBACK;
 let stations: StationInfo[] = [];
 /** What this staff member may open: station staff see only stations. */
 let access: "counter" | "station" | "all" = "all";
+/** Whether this person may refund, and up to what on one order (from `/api/me`). */
+let refunds: { can: boolean; limitMinor?: number | undefined } = { can: false };
+/** The powers of the signed-in level (`/api/me`), so a screen shows only what this person may open. */
+let powers: readonly string[] = [];
 
 function localStorageOrUndefined(): Storage | undefined {
   try {
@@ -72,11 +92,27 @@ function localStorageOrUndefined(): Storage | undefined {
 const money = (minor: number) => formatPrice(minor, catalog.business.currency, locale);
 /** The change to hand back keeps every digit. */
 const exactMoney = (minor: number) => formatMoney(minor, catalog.business.currency, locale);
-const price = (itemId: string, size?: string) => priceOf(catalog.categories, itemId, size);
+const price = (itemId: string, size?: string, extras?: readonly string[]) => priceOfLine(catalog, itemId, size, extras);
 const max = () => catalog.business.maxQtyPerLine;
 const stationName = (id: string) => stations.find((s) => s.id === id)?.name ?? id;
-const lineText = (l: { qty: number; name: string; size?: string }) =>
-  t("lineQty", { qty: String(l.qty), name: l.size === undefined ? l.name : `${l.name} (${l.size})` });
+/** One line as text for screens and speech: the item and size, its extras, then the note. */
+const lineText = (l: {
+  qty: number;
+  name: string;
+  size?: string;
+  extras?: readonly { name: string }[];
+  note?: string;
+}) =>
+  t("lineQty", {
+    qty: String(l.qty),
+    name: [
+      l.size === undefined ? l.name : `${l.name} (${l.size})`,
+      l.extras === undefined || l.extras.length === 0 ? "" : l.extras.map((e) => e.name).join(" + "),
+      l.note === undefined ? "" : `"${l.note}"`,
+    ]
+      .filter((p) => p !== "")
+      .join(" · "),
+  });
 
 function failureText(e: unknown): string {
   if (!(e instanceof ApiFailure)) return t("failed");
@@ -151,7 +187,7 @@ function header(title: string, subtitle?: string): HTMLElement {
   return appHeader({
     title,
     titleHref: "#/",
-    subtitle: subtitle ?? `${catalog.business.name} · ${day}`,
+    subtitle: subtitle ?? `${title === catalog.business.name ? t("staffTitle") : catalog.business.name} · ${day}`,
     style: theme.header.style,
     logo: theme.logo,
     actions: [
@@ -192,6 +228,9 @@ function startGate(then: () => void): void {
     h(
       "main",
       { class: "gate" },
+      h("span", { class: "gate-ic", "aria-hidden": "true" }, icon("bell")),
+      h("h1", {}, t("startTitle")),
+      h("p", { class: "muted" }, t("startSub")),
       uiButton(
         {
           kind: "primary",
@@ -264,6 +303,24 @@ function loginView(): void {
   );
 }
 
+/** One screen of the staff app as a tile: icon, name and what it is for. Its accessible name is the screen's name. */
+/** A station's tile icon: its first category's (a theme's category icon included), so six kitchens don't look alike. */
+function stationIcon(s: StationInfo): Node {
+  const cat = catalog.categories.find((c) => c.id === s.categories?.[0]);
+  const ref = cat === undefined ? undefined : theme.categoryIcons[cat.id];
+  return iconRef(ref ?? { icon: cat?.icon ?? "cooking" });
+}
+
+function screenTile(href: string, title: string, hint: string, glyph: string | Node, main = false): HTMLElement {
+  return h(
+    "a",
+    { class: `tile${main ? " main" : ""}`, href, "aria-label": title },
+    h("span", { class: "tile-ic", "aria-hidden": "true" }, typeof glyph === "string" ? icon(glyph) : glyph),
+    h("span", { class: "tile-tx" }, h("b", {}, title), h("small", {}, hint)),
+    h("span", { class: "tile-go", "aria-hidden": "true" }, "›"),
+  );
+}
+
 function chooserView(): void {
   mount(
     root,
@@ -271,10 +328,18 @@ function chooserView(): void {
     h(
       "main",
       { class: "chooser" },
+      eventCardSlot(),
       h("h2", {}, t("chooseScreen")),
-      access !== "station" && h("a", { class: "button primary", href: "#/counter" }, t("counterTitle")),
-      ...stations.map((s) =>
-        h("a", { class: "button secondary", href: `#/station/${encodeURIComponent(s.id)}` }, s.name),
+      h(
+        "div",
+        { class: "tiles" },
+        access !== "station" && screenTile("#/counter", t("counterTitle"), t("counterHint"), "receipt", true),
+        access !== "station" && screenTile("#/runner", t("runnerTitle"), t("runnerHint"), "map_pin"),
+        access !== "station" && hasRooms() && screenTile("#/rooms", t("roomsTitle"), t("roomsHint"), "bell"),
+        powers.includes("menu.switch") && screenTile("#/manager", t("managerTitle"), t("managerHint"), "clipboard"),
+        ...stations.map((s) =>
+          screenTile(`#/station/${encodeURIComponent(s.id)}`, s.name, t("stationHint"), stationIcon(s)),
+        ),
       ),
     ),
   );
@@ -298,11 +363,14 @@ function receipt(o: StaffOrderView): Ticket {
     at: o.createdAt,
     timeZone: catalog.business.timeZone,
     ...(o.customerName === undefined ? {} : { customerName: o.customerName }),
+    ...(o.spot === undefined ? {} : { spot: o.spot }),
     lines: o.lines.map((l) => ({
       name: l.name,
       qty: l.qty,
       unitMinor: l.unitMinor,
       ...(l.size === undefined ? {} : { size: l.size }),
+      ...(l.extras === undefined ? {} : { extras: l.extras.map((e) => e.name) }),
+      ...(l.note === undefined ? {} : { note: l.note }),
     })),
     money: {
       currency: o.currency,
@@ -320,6 +388,8 @@ interface Quick {
   categoryId?: string;
   step: "pick" | "cash" | "upi";
   received?: number;
+  /** Where the customer will sit, as a spot id; optional. */
+  spot?: string;
   /** The walk-in order once created, so a retried payment can't create it twice. */
   created?: { order: StaffOrderView; key: string };
   clientKey: string;
@@ -358,6 +428,10 @@ async function counterView(): Promise<void> {
     const p = o.payment;
     const due = o.outstandingMinor;
     if (due <= 0) return h("p", { class: "paid" }, t("paidLabel", { amount: money(o.totalMinor) }));
+    // A room's bill is taken at checkout, in Rooms, never here (D-082).
+    if (onOpenRoomBill(o)) {
+      return h("p", { class: "hint room-bill" }, t("onRoomBill", { spot: o.spot ?? o.roomBill?.room ?? "" }));
+    }
     const topUp = p.state === "confirmed";
     const confirm = (method: PaymentMethod) =>
       post(path(o, topUp ? "topup" : "confirm"), { method, amountMinor: due }).then(() => {
@@ -381,7 +455,7 @@ async function counterView(): Promise<void> {
           h(
             "div",
             { class: "sheet-head" },
-            h("span", { class: "token" }, o.token),
+            h("span", { class: "token" }, orderNumber(o.token)),
             h(
               "div",
               { class: "tt" },
@@ -428,6 +502,7 @@ async function counterView(): Promise<void> {
             t("cashReceived"),
           ),
           action(t("upiReceived"), `upi-${o.id}`, () => confirm("upi"), error),
+          catalog.payments.card === true && action(t("cardReceived"), `card-${o.id}`, () => confirm("card"), error),
         ),
       );
     }
@@ -436,7 +511,7 @@ async function counterView(): Promise<void> {
 
   function card(o: StaffOrderView): HTMLElement {
     const last = o.history.at(-1);
-    const canUndo = last !== undefined && Date.now() - last.at <= UNDO_WINDOW_MS;
+    const canUndo = last !== undefined && serverNow() - last.at <= UNDO_WINDOW_MS;
     const next =
       o.status === "pending"
         ? action(t("startPreparing"), `adv-${o.id}`, () => post(path(o, "advance")), error, "primary")
@@ -447,8 +522,9 @@ async function counterView(): Promise<void> {
       h(
         "div",
         { class: "card-head" },
-        h("span", { class: "token" }, o.token),
+        h("span", { class: "token" }, orderNumber(o.token)),
         o.customerName !== undefined && h("span", {}, o.customerName),
+        o.spot !== undefined && h("span", { class: "spot-badge" }, o.spot),
         isReady(o) && h("span", { class: "badge ready" }, t("readyBadge")),
       ),
       h(
@@ -471,6 +547,16 @@ async function counterView(): Promise<void> {
         ),
       ),
       paymentBlock(o),
+      refundBlock(o, {
+        currency: catalog.business.currency,
+        money,
+        methods: catalog.payments.card === true ? ["cash", "upi", "card"] : ["cash", "upi"],
+        canRefund: refunds.can,
+        limitMinor: refunds.limitMinor,
+        give: (order, b) => post(path(order, "refund"), b),
+        action: (label, key, run, cls = "") => action(label, key, run, error, cls),
+        rerender: () => keepFocus(render),
+      }),
       next,
       h(
         "div",
@@ -536,7 +622,7 @@ async function counterView(): Promise<void> {
         h("small", {}, label.replace(/\s*\d+\s*$/, "")),
       );
     const shown = all.filter((o) => tabOf(o) === tab);
-    const now = Date.now();
+    const now = serverNow();
     for (const [id, o] of recent) {
       const at = o.history.at(-1)?.at ?? 0;
       if (now - at > UNDO_WINDOW_MS) recent.delete(id);
@@ -576,7 +662,7 @@ async function counterView(): Promise<void> {
           h(
             "div",
             { class: "row recent", "data-testid": `done-${o.token}` },
-            h("span", { class: "token" }, o.token),
+            h("span", { class: "token" }, orderNumber(o.token)),
             action(t("undo"), `undo-${o.id}`, () => post(path(o, "undo")), error),
           ),
         ),
@@ -592,11 +678,17 @@ async function counterView(): Promise<void> {
       render();
     };
     const lines = () =>
-      q.cart.map((l) => ({ itemId: l.itemId, qty: l.qty, ...(l.size === undefined ? {} : { size: l.size }) }));
+      q.cart.map((l) => ({
+        itemId: l.itemId,
+        qty: l.qty,
+        ...(l.size === undefined ? {} : { size: l.size }),
+        ...(l.extras === undefined ? {} : { extras: l.extras }),
+        ...(l.note === undefined ? {} : { note: l.note }),
+      }));
     const createOnce = async () => {
       if (q.created) return q.created;
       const r = await api<{ order: { id: string }; key: string }>("POST", "/api/orders", {
-        body: { clientKey: q.clientKey, lines: lines() },
+        body: { clientKey: q.clientKey, lines: lines(), ...(q.spot === undefined ? {} : { spot: q.spot }) },
       });
       const full = await api<{ order: StaffOrderView }>("GET", `/api/orders/${encodeURIComponent(r.order.id)}`);
       apply(full.order);
@@ -616,6 +708,36 @@ async function counterView(): Promise<void> {
     const body: Child[] = [];
     if (q.step === "pick") {
       const chips = visibleCategories(catalog.categories);
+      if (catalog.zones !== undefined && catalog.zones.length > 0 && !q.addTo) {
+        body.push(
+          h(
+            "label",
+            { class: "field" },
+            t("spotLabel"),
+            h(
+              "select",
+              {
+                "data-key": "walk-in-spot",
+                on: {
+                  change: (e) => {
+                    const v = (e.target as HTMLSelectElement).value;
+                    if (v === "") delete q.spot;
+                    else q.spot = v;
+                  },
+                },
+              },
+              h("option", { value: "" }, t("spotNone")),
+              ...catalog.zones.map((z) =>
+                h(
+                  "optgroup",
+                  { label: z.name },
+                  ...z.spots.map((sp) => h("option", { value: sp.id, selected: sp.id === q.spot }, sp.label)),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
       body.push(
         h(
           "div",
@@ -660,25 +782,21 @@ async function counterView(): Promise<void> {
         q.cart = addOne(q.cart, itemId, size, max());
         keepFocus(render);
       };
+      const choose = (item: CatalogItem) =>
+        openOptions({
+          catalog,
+          item,
+          money,
+          room: (c) => max() - qtyOf(q.cart, item.id, c.size, c),
+          t: t as (key: string, vars?: Record<string, string>) => string,
+          onAdd: (c) => {
+            q.cart = setQty(q.cart, item.id, c.size, qtyOf(q.cart, item.id, c.size, c) + c.qty, max(), c);
+            keepFocus(render);
+          },
+        });
       const itemButtons = (item: CatalogItem): Child[] =>
-        item.variants
-          ? item.variants.map((v) =>
-              h(
-                "button",
-                {
-                  type: "button",
-                  class: "size",
-                  "data-key": `add-${item.id}-${v.size}`,
-                  "aria-label": t("addSize", { item: item.name, size: v.size }),
-                  on: { click: () => add(item.id, v.size) },
-                },
-                h("span", { class: "size-name" }, v.size),
-                h("span", { class: "price" }, money(v.price)),
-                qtyOf(q.cart, item.id, v.size) > 0 &&
-                  h("span", { class: "badge" }, `×${qtyOf(q.cart, item.id, v.size)}`),
-              ),
-            )
-          : [
+        extraGroupsOf(catalog, item.id).length > 0
+          ? [
               h(
                 "button",
                 {
@@ -686,12 +804,48 @@ async function counterView(): Promise<void> {
                   class: "add",
                   "data-key": `add-${item.id}`,
                   "aria-label": t("addItem", { item: item.name }),
-                  on: { click: () => add(item.id) },
+                  on: { click: () => choose(item) },
                 },
-                h("span", { class: "price" }, money(item.price ?? 0)),
-                qtyOf(q.cart, item.id) > 0 && h("span", { class: "badge" }, `×${qtyOf(q.cart, item.id)}`),
+                h("span", { class: "price" }, t("add")),
+                q.cart.some((l) => l.itemId === item.id) &&
+                  h(
+                    "span",
+                    { class: "badge" },
+                    `×${q.cart.filter((l) => l.itemId === item.id).reduce((n, l) => n + l.qty, 0)}`,
+                  ),
               ),
-            ];
+            ]
+          : item.variants
+            ? item.variants.map((v) =>
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "size",
+                    "data-key": `add-${item.id}-${v.size}`,
+                    "aria-label": t("addSize", { item: item.name, size: v.size }),
+                    on: { click: () => add(item.id, v.size) },
+                  },
+                  h("span", { class: "size-name" }, v.size),
+                  h("span", { class: "price" }, money(v.price)),
+                  qtyOf(q.cart, item.id, v.size) > 0 &&
+                    h("span", { class: "badge" }, `×${qtyOf(q.cart, item.id, v.size)}`),
+                ),
+              )
+            : [
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "add",
+                    "data-key": `add-${item.id}`,
+                    "aria-label": t("addItem", { item: item.name }),
+                    on: { click: () => add(item.id) },
+                  },
+                  h("span", { class: "price" }, money(item.price ?? 0)),
+                  qtyOf(q.cart, item.id) > 0 && h("span", { class: "badge" }, `×${qtyOf(q.cart, item.id)}`),
+                ),
+              ];
       for (const cat of visibleCategories(catalog.categories, "", q.categoryId)) {
         body.push(
           h(
@@ -716,9 +870,15 @@ async function counterView(): Promise<void> {
       { class: "lines" },
       ...q.cart.map((l) => {
         const name = findItem(catalog.categories, l.itemId)?.name ?? l.itemId;
-        const label = l.size === undefined ? name : `${name} (${l.size})`;
+        const label = lineText({
+          qty: 1,
+          name,
+          ...(l.size === undefined ? {} : { size: l.size }),
+          extras: extraOptions(catalog, l.extras),
+          ...(l.note === undefined ? {} : { note: l.note }),
+        }).replace(/^1 × /, "");
         const step = (d: number) => {
-          q.cart = setQty(q.cart, l.itemId, l.size, l.qty + d, max());
+          q.cart = setQty(q.cart, l.itemId, l.size, l.qty + d, max(), l);
           keepFocus(render);
         };
         // Once the walk-in's order exists (a UPI QR is showing its total), its lines can't change here.
@@ -800,6 +960,7 @@ async function counterView(): Promise<void> {
               },
               t("payCash"),
             ),
+            catalog.payments.card === true && action(t("payCard"), "pay-card", () => pay("card"), error),
             catalog.payments.upi &&
               action(
                 t("payUpi"),
@@ -883,6 +1044,130 @@ async function counterView(): Promise<void> {
   render();
 }
 
+// ── Runner ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Every open order with its spot and each line's station and state: "T12: 2 of 3 delivered, waiting on Smoothies". Late
+ * orders come first and are announced once; the 30 s tick re-reads the clock so an order turns late without an event.
+ */
+async function runnerView(): Promise<void> {
+  const gen = ++generation;
+  const snap = await api<{ orders: StaffOrderView[]; lastEventId: number }>("GET", "/api/orders");
+  if (gen !== generation) return;
+  const orders = new Map(snap.orders.map((o) => [o.id, o]));
+  const error = h("p", { class: "error", role: "alert" });
+  const lateMs = catalog.business.lateMinutes * 60_000;
+  const announced = new Set<string>();
+
+  const rows = () => runnerOrders([...orders.values()], serverNow(), lateMs);
+  const serve = async (o: RunnerOrder, indexes: number[]) => {
+    for (const i of indexes) {
+      const r = await api<{ order: StaffOrderView }>(
+        "POST",
+        `/api/orders/${encodeURIComponent(o.id)}/lines/${i}/served`,
+        { body: {} },
+      );
+      if (r.order.status === "completed") orders.delete(r.order.id);
+      else orders.set(r.order.id, r.order);
+    }
+    keepFocus(render);
+  };
+  const stateText = (s: "making" | "ready" | "delivered") =>
+    ({ making: t("stateMaking"), ready: t("stateReady"), delivered: t("stateDelivered") })[s];
+
+  function card(o: RunnerOrder): HTMLElement {
+    const waiting = o.waitingOn.map(stationName).join(", ");
+    const readyIdx = o.lines.filter((l) => l.state === "ready").map((l) => l.index);
+    return h(
+      "article",
+      { class: `order-card${o.late ? " late" : ""}`, "data-testid": `run-${o.token}` },
+      h(
+        "div",
+        { class: "card-head" },
+        h("span", { class: "token" }, orderNumber(o.token)),
+        o.spot !== undefined && h("span", { class: "spot-badge" }, o.spot),
+        o.late !== undefined && h("span", { class: "chip err" }, t("lateBadge")),
+      ),
+      h(
+        "p",
+        { class: "hint" },
+        t("deliveredOf", { n: String(o.delivered), total: String(o.lines.length) }),
+        o.waitingOn.length > 0 && ` · ${t("waitingOn", { stations: waiting })}`,
+        o.toCarry > 0 && ` · ${t("toCarry", { n: String(o.toCarry) })}`,
+      ),
+      h(
+        "ul",
+        { class: "lines" },
+        ...o.lines.map((l) =>
+          h(
+            "li",
+            { class: l.state === "delivered" ? "served" : "" },
+            h(
+              "span",
+              { class: "line-name" },
+              lineText({
+                qty: l.qty,
+                name: l.name,
+                ...(l.size === undefined ? {} : { size: l.size }),
+                ...(l.extras === undefined ? {} : { extras: l.extras.map((name) => ({ name })) }),
+                ...(l.note === undefined ? {} : { note: l.note }),
+              }),
+            ),
+            h("span", { class: "hint" }, stationName(l.stationId), " · ", stateText(l.state)),
+            l.state === "ready" && action(t("deliver"), `deliver-${o.id}-${l.index}`, () => serve(o, [l.index]), error),
+          ),
+        ),
+      ),
+      readyIdx.length > 1 &&
+        action(t("deliverReady"), `deliver-all-${o.id}`, () => serve(o, readyIdx), error, "primary"),
+    );
+  }
+
+  function alertLate(): void {
+    for (const o of rows()) {
+      const key = `${o.id}:${o.late}`;
+      if (o.late === undefined || announced.has(key)) continue;
+      announced.add(key);
+      const vars = { token: o.token, spot: o.spot ?? "" };
+      const text = o.late === "part-delivered" ? t("lateAlertPart", vars) : t("lateAlertReady", vars);
+      announce(text, "");
+      if (!voice.muted()) voice.say(text);
+    }
+  }
+
+  function render(): void {
+    if (gen !== generation) return;
+    const list = rows();
+    mount(
+      root,
+      header(t("runnerTitle"), t("runnerSub")),
+      h(
+        "main",
+        { class: "runner" },
+        error,
+        ...(list.length === 0 ? [h("p", { class: "empty" }, t("noRunnerOrders"))] : list.map(card)),
+      ),
+    );
+    alertLate();
+  }
+
+  cleanup.push(
+    followStream<StaffOrderView>({
+      stream: "/api/stream/counter",
+      poll: "/api/poll/counter",
+      after: snap.lastEventId,
+      onEvent: (e: OrderEvent<StaffOrderView>) => {
+        if (e.order.status === "completed") orders.delete(e.order.id);
+        else orders.set(e.order.id, e.order);
+        keepFocus(render);
+      },
+    }),
+  );
+  const tick = setInterval(() => keepFocus(render), 30_000);
+  cleanup.push(() => clearInterval(tick));
+  render();
+}
+
 /** The cash helper: what the customer handed over (one tap), and the change to give back. */
 /** The big green "Change due" tile beside the total in the cash sheet; "Still short" when the cash doesn't cover it. */
 function changeTile(dueMinor: number, received: number | undefined): HTMLElement {
@@ -936,6 +1221,10 @@ function cashPanel(
 
 // ── Station ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** Whether a line has the extras and note of a batch row (rows differ by them). */
+const sameVariant = (l: StationLine, r: { extras?: string[]; note?: string }) =>
+  (l.extras ?? []).map((e) => e.name).join("+") === (r.extras ?? []).join("+") && (l.note ?? "") === (r.note ?? "");
+
 const isOpen = (o: StationOrderView, l: StationLine) => o.status !== "completed" && !l.served && !l.ready;
 
 function stationTicket(o: StationOrderView, info: StationInfo): Ticket {
@@ -947,9 +1236,16 @@ function stationTicket(o: StationOrderView, info: StationInfo): Ticket {
     timeZone: catalog.business.timeZone,
     station: info.name,
     ...(o.customerName === undefined ? {} : { customerName: o.customerName }),
+    ...(o.spot === undefined ? {} : { spot: o.spot }),
     lines: o.lines
       .filter((l) => isOpen(o, l))
-      .map((l) => ({ name: l.name, qty: l.qty, ...(l.size === undefined ? {} : { size: l.size }) })),
+      .map((l) => ({
+        name: l.name,
+        qty: l.qty,
+        ...(l.size === undefined ? {} : { size: l.size }),
+        ...(l.extras === undefined ? {} : { extras: l.extras.map((e) => e.name) }),
+        ...(l.note === undefined ? {} : { note: l.note }),
+      })),
   };
 }
 
@@ -981,7 +1277,7 @@ async function stationScreen(id: string): Promise<void> {
     const first = open()[0];
     return first === undefined
       ? "–"
-      : t("oldestAge", { n: String(Math.max(0, Math.floor((Date.now() - first.createdAt) / 60_000))) });
+      : t("oldestAge", { n: String(Math.max(0, Math.floor((serverNow() - first.createdAt) / 60_000))) });
   };
   const tick = setInterval(() => keepFocus(render), 30_000);
   cleanup.push(() => clearInterval(tick));
@@ -1025,8 +1321,8 @@ async function stationScreen(id: string): Promise<void> {
   }
 
   const CHIPS = 4;
-  /** The day is the same on every chip, so a chip shows the number after it and the full token is its label. */
-  const chipText = (token: string) => token.slice(token.indexOf("-") + 1);
+  /** A chip shows the order number; its label says the same with the spot. */
+  const chipText = (token: string) => orderNumber(token);
 
   function batchBody(): Child[] {
     const list = open();
@@ -1055,7 +1351,13 @@ async function stationScreen(id: string): Promise<void> {
               h(
                 "li",
                 {},
-                h("span", { class: "sz" }, r.size ?? ""),
+                h(
+                  "span",
+                  { class: "sz" },
+                  r.size ?? "",
+                  r.extras !== undefined && h("span", { class: "extras" }, r.extras.join(" + ")),
+                  r.note !== undefined && h("span", { class: "note" }, r.note),
+                ),
                 h(
                   "span",
                   { class: `count${gi === 0 && ri === 0 ? " first" : ""}` },
@@ -1064,10 +1366,24 @@ async function stationScreen(id: string): Promise<void> {
                 ),
                 h(
                   "span",
-                  { class: "chips", "aria-label": t("tokensFor", { tokens: r.tokens.join(", ") }) },
+                  {
+                    class: "chips",
+                    "aria-label": t("tokensFor", {
+                      tokens: r.tokens
+                        .map((tk) => (r.spots?.[tk] === undefined ? tk : `${tk} ${r.spots?.[tk]}`))
+                        .join(", "),
+                    }),
+                  },
                   ...r.tokens
                     .slice(0, r.tokens.length > CHIPS + 1 ? CHIPS : r.tokens.length)
-                    .map((tk) => h("i", { title: tk }, chipText(tk))),
+                    .map((tk) =>
+                      h(
+                        "i",
+                        { title: orderNumbers(r.spots?.[tk] === undefined ? tk : `${tk} ${r.spots?.[tk]}`) },
+                        chipText(tk),
+                        r.spots?.[tk] !== undefined && h("small", { class: "spot-badge" }, r.spots?.[tk]),
+                      ),
+                    ),
                   r.tokens.length > CHIPS + 1 && h("i", {}, t("moreTokens", { n: String(r.tokens.length - CHIPS) })),
                 ),
                 labelled(
@@ -1075,7 +1391,7 @@ async function stationScreen(id: string): Promise<void> {
                   action(
                     "✓",
                     `ready-${g.itemId}-${r.size ?? ""}`,
-                    () => ready(refsOf((l) => l.itemId === g.itemId && l.size === r.size)),
+                    () => ready(refsOf((l) => l.itemId === g.itemId && l.size === r.size && sameVariant(l, r))),
                     error,
                     "check",
                   ),
@@ -1129,8 +1445,9 @@ async function stationScreen(id: string): Promise<void> {
         h(
           "div",
           { class: "card-head" },
-          h("span", { class: "token" }, o.token),
+          h("span", { class: "token" }, orderNumber(o.token)),
           o.customerName !== undefined && h("span", {}, o.customerName),
+          o.spot !== undefined && h("span", { class: "spot-badge" }, o.spot),
         ),
         h(
           "ul",
@@ -1272,7 +1589,10 @@ async function route(): Promise<void> {
   const hash = location.hash;
   try {
     if (hash === "#/counter" && access !== "station") return startGate(() => void counterView().catch(showFailure));
+    if (hash === "#/runner" && access !== "station") return startGate(() => void runnerView().catch(showFailure));
     const m = /^#\/station\/(.+)$/.exec(hash);
+    if (hash === "#/manager" && powers.includes("menu.switch")) return void managerScreen().catch(showFailure);
+    if (hash === "#/rooms" && access !== "station" && hasRooms()) return void roomsScreen().catch(showFailure);
     if (m) return startGate(() => void stationScreen(decodeURIComponent(m[1] as string)).catch(showFailure));
     chooserView();
   } catch (e) {
@@ -1293,8 +1613,105 @@ function showFailure(e: unknown): void {
   );
 }
 
+/** The manager's menu screen: items on or off and today's counts. */
+async function managerScreen(): Promise<void> {
+  const gen = ++generation;
+  const error = h("p", { class: "error", role: "alert" });
+  const draw = async () => {
+    const body = await managerBody(
+      () => void draw().catch(showFailure),
+      (e) => {
+        error.textContent = failureText(e);
+      },
+      error,
+    );
+    const events = powers.includes("events.manage")
+      ? await eventsBody(
+          catalog.business.currency,
+          () => void draw().catch(showFailure),
+          (e) => {
+            eventsError.textContent = failureText(e);
+          },
+          eventsError,
+          editing,
+          (e) => {
+            editing = e;
+            void draw().catch(showFailure);
+          },
+        )
+      : [];
+    if (gen === generation)
+      mount(
+        root,
+        header(t("managerTitle"), t("managerSub")),
+        h(
+          "main",
+          { class: "manager" },
+          eventCardSlot(),
+          ...body,
+          events.length > 0 &&
+            h(
+              "section",
+              { class: "mgr-events", "data-testid": "mgr-events" },
+              h("h2", {}, te("eventsTitle")),
+              ...events,
+            ),
+        ),
+      );
+  };
+  const eventsError = h("p", { class: "error", role: "alert" });
+  let editing: CalendarEvent | undefined;
+  await draw();
+}
+
+/** Whether the business lets rooms: a zone of kind room in spots.json. */
+function hasRooms(): boolean {
+  return catalog.zones?.some((z) => z.kind === "room") === true;
+}
+
+/** Rooms: each room's open bill, settled at checkout; read again whenever an order changes on the counter's stream. */
+async function roomsScreen(): Promise<void> {
+  const gen = ++generation;
+  const shown = new Set<string>();
+  const error = h("p", { class: "error", role: "alert" });
+  const opts = {
+    currency: catalog.business.currency,
+    timeZone: catalog.business.timeZone,
+    upi: catalog.payments.upi === true,
+    card: catalog.payments.card === true,
+  };
+  const draw = async () => {
+    const body = await roomsBody(
+      opts,
+      () => void draw().catch(showFailure),
+      (e) => {
+        error.textContent = failureText(e);
+      },
+      error,
+      shown,
+    );
+    if (gen === generation) mount(root, header(t("roomsTitle"), t("roomsSub")), h("main", { class: "rooms" }, ...body));
+  };
+  await draw();
+  const snap = await api<{ lastEventId: number }>("GET", "/api/orders");
+  if (gen !== generation) return;
+  cleanup.push(
+    followStream<StaffOrderView>({
+      stream: "/api/stream/counter",
+      poll: "/api/poll/counter",
+      after: snap.lastEventId,
+      // Only an event about a room-bill order, or one on screen (taken off a bill elsewhere), changes this screen (D-083).
+      onEvent: (e: OrderEvent<StaffOrderView>) => {
+        if (e.order.roomBill !== undefined || shown.has(e.order.id)) void draw().catch(showFailure);
+      },
+    }),
+  );
+}
+
 async function start(): Promise<void> {
   initMode();
+  // Signed in, the list holds staff-only events too.
+  reloadEvents();
   try {
     catalog ??= await api<StaffCatalog>("GET", "/api/catalog");
     theme = await loadThemeInfo();
@@ -1303,7 +1720,17 @@ async function start(): Promise<void> {
     });
     document.title = `${t("staffTitle")} · ${catalog.business.name}`;
     try {
-      access = (await api<{ access: typeof access }>("GET", "/api/me")).access;
+      const me = await api<{
+        access: typeof access;
+        canRefund: boolean;
+        refundLimitMinor?: number;
+        powers: string[];
+      }>("GET", "/api/me");
+      // The system admin signs in at /admin and works no counter or station: here that is a sign-in screen.
+      if (!me.powers.includes("orders.view")) return loginView();
+      powers = me.powers;
+      access = me.access;
+      refunds = { can: me.canRefund, limitMinor: me.refundLimitMinor };
     } catch (e) {
       if (e instanceof ApiFailure && e.status === 401) return loginView();
       throw e;
@@ -1315,7 +1742,7 @@ async function start(): Promise<void> {
   }
 }
 
-window.addEventListener("hashchange", () => void route());
+window.addEventListener("hashchange", () => transition(() => void route()));
 void start();
 if ("serviceWorker" in navigator && window.isSecureContext) {
   // Its own worker, scoped to the staff page, so the storefront's never fetches staff files and this one no customer's.

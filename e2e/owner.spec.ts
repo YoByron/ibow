@@ -145,7 +145,7 @@ test("the owner's tabs are chips: padded, bordered, not underlined, and the curr
       };
     }),
   );
-  expect(looks).toHaveLength(6);
+  expect(looks).toHaveLength(7);
   for (const [i, l] of looks.entries()) {
     expect(l.underline, `tab ${i}`).toBe("none");
     expect(l.padLeft, `tab ${i}`).toBeGreaterThanOrEqual(8);

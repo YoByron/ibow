@@ -67,7 +67,7 @@ describe("retention", () => {
     const old = place(store, t0, "Asha");
     const recent = place(store, t0 + 20 * DAY, "Ravi");
     const cleared = store.forgetCustomers(t0 + 10 * DAY);
-    expect(cleared).toEqual({ orders: 1, events: 2, reviews: 1 });
+    expect(cleared).toEqual({ orders: 1, events: 2, reviews: 1, notes: 0 });
 
     expect(store.getOrder(old)?.order.customerName).toBeUndefined();
     expect(store.getReview(old)).toEqual({ orderId: old, rating: 5, at: t0 + 180_000 });
@@ -81,7 +81,7 @@ describe("retention", () => {
     expect(store.getReview(recent)?.text).toBe("Lovely, says Ravi");
     for (const e of store.eventsAfter(0, { orderId: recent })) expect(e.order.customerName).toBe("Ravi");
     // A second pass finds nothing left to clear.
-    expect(store.forgetCustomers(t0 + 10 * DAY)).toEqual({ orders: 0, events: 0, reviews: 0 });
+    expect(store.forgetCustomers(t0 + 10 * DAY)).toEqual({ orders: 0, events: 0, reviews: 0, notes: 0 });
   });
 
   test("each pass reads only what came of age since the last one, from a mark kept in the store", () => {
@@ -94,7 +94,7 @@ describe("retention", () => {
       expect(store.forgetCustomers(t0 + DAY)).toMatchObject({ orders: 1, reviews: 1 });
       expect(store.retentionMark()).toBe(t0 + DAY);
       // An earlier cutoff (retentionDays raised) has nothing left to do and keeps the mark.
-      expect(store.forgetCustomers(t0)).toEqual({ orders: 0, events: 0, reviews: 0 });
+      expect(store.forgetCustomers(t0)).toEqual({ orders: 0, events: 0, reviews: 0, notes: 0 });
       expect(store.retentionMark()).toBe(t0 + DAY);
       store.close();
       store = openStore(path);
@@ -207,9 +207,10 @@ describe("retention", () => {
       raw.exec("DROP TABLE scratch");
       // Back to schema 7, the last before the VACUUM step: undo the migrations after it (the retention mark, the day totals, the local fields, the theme override).
       raw.exec(
-        "DROP TABLE theme_override; DROP TABLE day_totals; DROP TABLE retention; DROP INDEX reviews_at; DROP INDEX payments_day; DROP INDEX payment_top_ups_day; DROP INDEX orders_unlocal; DROP INDEX payments_unlocal; DROP INDEX payment_top_ups_unlocal;" +
+        "DROP TABLE room_bill_moves; DROP TABLE calendar_events; DROP TABLE room_settlements; DROP INDEX orders_room_open; ALTER TABLE orders DROP COLUMN room; ALTER TABLE orders DROP COLUMN room_settled; DROP TABLE meta; DROP TABLE telemetry_hours; DROP TABLE flag_audit; DROP TABLE flags; DROP TABLE payment_refunds; DROP TABLE daily_counts; DROP TABLE theme_override; DROP TABLE day_totals; DROP TABLE retention; DROP INDEX reviews_at; DROP INDEX payments_day; DROP INDEX payment_top_ups_day; DROP INDEX orders_unlocal; DROP INDEX payments_unlocal; DROP INDEX payment_top_ups_unlocal;" +
           "ALTER TABLE orders DROP COLUMN local_min; ALTER TABLE payments DROP COLUMN day; ALTER TABLE payments DROP COLUMN local_min;" +
-          "ALTER TABLE payment_top_ups DROP COLUMN day; ALTER TABLE payment_top_ups DROP COLUMN local_min; PRAGMA user_version = 7",
+          "ALTER TABLE payment_top_ups DROP COLUMN day; ALTER TABLE payment_top_ups DROP COLUMN local_min;" +
+          "ALTER TABLE orders DROP COLUMN spot; ALTER TABLE order_lines DROP COLUMN extras; ALTER TABLE order_lines DROP COLUMN note; ALTER TABLE order_lines DROP COLUMN ready_at; ALTER TABLE order_lines DROP COLUMN served_at; PRAGMA user_version = 7",
       );
       raw.exec("PRAGMA wal_checkpoint(TRUNCATE)");
       raw.close();
@@ -247,5 +248,75 @@ describe("retention", () => {
     stop();
     vi.advanceTimersByTime(10 * 60 * 60_000);
     expect(runs).toHaveLength(2);
+  });
+});
+
+describe("line notes go with names (D-073)", () => {
+  function withNote(store: Store, at: number, note: string): string {
+    n++;
+    const id = `note-${n}`;
+    const { order } = store.createOrder({
+      id,
+      secret: `s-${n}`,
+      clientKey: `note-client-key-${n}-xx`,
+      now: at,
+      timeZone: config.business.timeZone,
+      build: (token) =>
+        createOrder(config, {
+          id,
+          token,
+          now: at,
+          lines: [
+            { itemId: "masala-soda", qty: 1, note: note },
+            { itemId: "masala-soda", qty: 2 },
+          ],
+        }),
+    });
+    store.saveOrder(advanceStatus(order, at + 60_000), "order.status", at + 60_000);
+    return id;
+  }
+
+  test("a note is cleared from the lines and every snapshot after retentionDays, keeping the lines", () => {
+    const store = fresh();
+    const old = withNote(store, t0, "for Priyanka");
+    const recent = withNote(store, t0 + 20 * DAY, "for Rohan");
+    expect(store.forgetCustomers(t0 + 10 * DAY)).toMatchObject({ notes: 1 });
+    const gone = store.getOrder(old)?.order.lines;
+    expect(gone?.map((l) => l.note)).toEqual([undefined, undefined]);
+    expect(gone?.map((l) => l.qty)).toEqual([1, 2]);
+    const events = store.eventsAfter(0, { orderId: old });
+    expect(events).toHaveLength(2);
+    for (const e of events) {
+      expect(e.order.lines.map((l) => l.qty)).toEqual([1, 2]);
+      expect(e.order.lines.every((l) => l.note === undefined)).toBe(true);
+    }
+    expect(store.getOrder(recent)?.order.lines[0]?.note).toBe("for Rohan");
+    for (const e of store.eventsAfter(0, { orderId: recent })) expect(e.order.lines[0]?.note).toBe("for Rohan");
+  });
+
+  test("the note is overwritten with spaces first and is gone from the database file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ibow-note-"));
+    try {
+      const path = join(dir, "ibow.db");
+      const store = openStore(path);
+      withNote(store, t0, "forZanzibarqueen");
+      store.close();
+      const raw = new DatabaseSync(path);
+      raw.exec(`CREATE TABLE seen (value TEXT);
+        CREATE TRIGGER seen_n AFTER UPDATE OF note ON order_lines BEGIN INSERT INTO seen VALUES (new.note); END;`);
+      raw.close();
+      const again = openStore(path);
+      again.forgetCustomers(t0 + 10 * DAY);
+      again.close();
+      const check = new DatabaseSync(path);
+      const seen = (check.prepare("SELECT value FROM seen").all() as { value: string | null }[]).map((r) => r.value);
+      expect(seen).toEqual([" ".repeat("forZanzibarqueen".length), null]);
+      check.close();
+      for (const f of [path, `${path}-wal`]) {
+        if (existsSync(f)) expect(readFileSync(f).toString("latin1")).not.toContain("Zanzibarqueen");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

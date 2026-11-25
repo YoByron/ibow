@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import { BATCH_TEMPLATES, type BatchTemplate, openBatch, renderBatch } from "../src/core/batches.ts";
 import { stationFor } from "../src/core/config.ts";
 import { createOrder, type Order } from "../src/core/orders.ts";
-import { nextToken, type TokenCounter } from "../src/core/tokens.ts";
+import { nextToken, orderNumber, type TokenCounter } from "../src/core/tokens.ts";
 import { generateRush, type Rush, SAMPLE_RUSHES } from "./support/rush.ts";
 import { loadSample, readSample, sampleRaw } from "./support/samples.ts";
 
@@ -15,7 +15,7 @@ const samples = readdirSync(fileURLToPath(new URL("../samples/", import.meta.url
 const en = BATCH_TEMPLATES.en as BatchTemplate;
 
 test("the samples cover different kinds of business", () => {
-  expect(samples).toEqual(["bakery", "coffee-cart", "food-truck", "service-desk", "tea-house"]);
+  expect(samples).toEqual(["bakery", "coffee-cart", "food-truck", "garden-cafe", "service-desk", "tea-house"]);
 });
 
 test("the samples span more than one currency and time zone", () => {
@@ -33,7 +33,13 @@ describe.each(samples)("sample %s", (sample) => {
     return rush.orders.map((r, i) => {
       const next = nextToken(counter, r.at, config.business.timeZone);
       counter = next.counter;
-      return createOrder(config, { id: `${sample}-${i}`, token: next.token, now: r.at, lines: r.lines });
+      return createOrder(config, {
+        id: `${sample}-${i}`,
+        token: next.token,
+        now: r.at,
+        lines: r.lines,
+        ...(r.spot === undefined ? {} : { spotId: r.spot }),
+      });
     });
   }
 
@@ -48,14 +54,17 @@ describe.each(samples)("sample %s", (sample) => {
     for (const [id, { categoryId }] of config.items) {
       const owners = config.stations.filter((s) => s.categories.includes(categoryId));
       expect(owners, id).toHaveLength(1);
-      expect(stationFor(config, id), id).toBe(owners[0]);
+      const own = config.items.get(id)?.item.station;
+      expect(stationFor(config, id), id).toBe(
+        own === undefined ? owners[0] : config.stations.find((s) => s.id === own),
+      );
     }
   });
 
   test("its rush is exactly what the seeded generator produces", () => {
     const opts = SAMPLE_RUSHES[sample];
     expect(opts, `SAMPLE_RUSHES["${sample}"]`).toBeDefined();
-    if (opts) expect(rush).toEqual(generateRush(config.catalog, opts));
+    if (opts) expect(rush).toEqual(generateRush(config.catalog, opts, config.zones));
   });
 
   test("replays its rush with unique tokens", () => {
@@ -76,7 +85,12 @@ describe.each(samples)("sample %s", (sample) => {
         expect(text).toBe(en.empty);
         continue;
       }
-      expect(text.startsWith(`Tokens ${batch.tokens.join(", ")} `), station.id).toBe(true);
+      expect(
+        text.startsWith(
+          `Orders ${batch.tokens.map((tk) => (batch.spots?.[tk] === undefined ? orderNumber(tk) : `${orderNumber(tk)} ${batch.spots[tk]}`)).join(", ")} `,
+        ),
+        station.id,
+      ).toBe(true);
       for (const line of batch.lines) expect(text, station.id).toContain(`${line.qty} ${line.name}`);
     }
     expect(batched).toBe(ordered);

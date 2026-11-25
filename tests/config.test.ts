@@ -33,6 +33,7 @@ describe("config", () => {
       timeZone: "America/New_York",
       maxQtyPerLine: 99,
       retentionDays: 30,
+      lateMinutes: 6,
     });
     expect(stationFor(config, "chai").id).toBe("tea");
     expect(stationFor(config, "momos").id).toBe("kitchen");
@@ -69,7 +70,7 @@ describe("config", () => {
     const err = errorOf(() => parseBusiness({ ...business, showCase: true }));
     expect(err.field).toBe("showCase");
     expect(err.message).toBe(
-      "business.json: showCase: expected one of name, currency, timeZone, maxQtyPerLine, retentionDays, cashShortcuts, hours, showcase, phone, address, found an unknown field",
+      "business.json: showCase: expected one of name, currency, timeZone, maxQtyPerLine, retentionDays, lateMinutes, cashShortcuts, hours, showcase, card, managerRefundLimit, phone, address, found an unknown field",
     );
     expect(parseBusiness({ ...business, showcase: true }).showcase).toBe(true);
   });

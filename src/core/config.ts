@@ -14,6 +14,8 @@ export interface Business {
   maxQtyPerLine: number;
   /** Days a customer's name and review text are kept before the store clears them; `business.json` may set it, default 30. */
   retentionDays: number;
+  /** Minutes after which an order handed over in part, or a line left ready, counts as late for the runner; default 6. */
+  lateMinutes: number;
   /**
    * Cash amounts the counter offers as one-tap "received" buttons, from `cashShortcuts` in `business.json` (major
    * units, such as `[5, 10, 20, 50]`), kept here in minor units. Absent: the counter derives them from the amount due.
@@ -21,6 +23,13 @@ export interface Business {
   cashShortcutsMinor?: number[];
   /** `showcase: true` in `business.json` serves the ibow showcase page at `/showcase` on a real install (D-055); a demo always does. */
   showcase?: boolean;
+  /** `card: true` in `business.json`: staff may record card payments (D-071). Default off, so a counter without a terminal shows no card button. */
+  card?: boolean;
+  /**
+   * `managerRefundLimit` in `business.json` (major units): the most a manager may refund on one order, in minor units. Absent:
+   * managers may not refund; the owner always may (D-072).
+   */
+  managerRefundLimitMinor?: number;
   phone?: string;
   address?: string;
   /** Opening hours, business-local (`hours: {open: "07:00", close: "22:00"}`); the storefront says "Open now" only with them. */
@@ -53,6 +62,27 @@ export interface CatalogItem {
   diet?: Diet;
   /** Defaults to true; an unavailable item cannot be ordered. */
   available?: boolean;
+  /** Ids of option groups from the catalog's `extras` library, offered on this item besides its category's. */
+  extras?: string[];
+  /** The station that prepares this item, overriding its category's (a cake in a drinks category). */
+  station?: string;
+}
+
+/** One choice inside an extras group. Its id is unique across the whole library, so an order names options by id alone. */
+export interface ExtraOption {
+  id: string;
+  name: string;
+  /** Integer minor units added to the unit price; 0 for a free choice. */
+  price: number;
+}
+
+/** A set of options a customer may add to an item ("Milk", "Add-ons"), picked between `min` and `max` times. */
+export interface ExtraGroup {
+  id: string;
+  name: string;
+  min: number;
+  max: number;
+  options: ExtraOption[];
 }
 
 export interface Category {
@@ -60,11 +90,41 @@ export interface Category {
   name: string;
   /** A bundled icon name (`ICONS` in theme.ts) shown on the category's chip and heading. */
   icon?: string;
+  /** Option group ids offered on every item of the category. */
+  extras?: string[];
   items: CatalogItem[];
+}
+
+/**
+ * A filter chip on the storefront, from item tags: `include` keeps items carrying `tag` ("vegan"), `exclude` drops items
+ * carrying it ("contains-nuts"). It follows the menu's tags only, so an item nobody tagged passes an `exclude` filter.
+ */
+export interface MenuFilter {
+  id: string;
+  name: string;
+  tag: string;
+  mode: "include" | "exclude";
 }
 
 export interface Catalog {
   categories: Category[];
+  filters?: MenuFilter[];
+  /** The library of extras groups that items and categories name by id; absent when the business sells none. */
+  extras?: ExtraGroup[];
+}
+
+/** A table, bench or corner where customers sit. `label` is what staff see and hear: the zone's name and the spot's. */
+export interface Spot {
+  id: string;
+  label: string;
+}
+
+export interface Zone {
+  id: string;
+  name: string;
+  /** `room`: the spots are rooms a business lets, whose guests may put an order on the room bill (D-082). */
+  kind?: "room";
+  spots: Spot[];
 }
 
 /** `batch`: open lines totalled across orders, spoken as one batch. `jobs`: one card per order, for work that belongs to one customer (a repair). */
@@ -87,12 +147,20 @@ export interface Config {
   items: ReadonlyMap<string, { item: CatalogItem; categoryId: string }>;
   /** Category id to the one station that prepares it. */
   stationByCategory: ReadonlyMap<string, Station>;
+  /** Where customers may say they sit (`spots.json`); empty when the business has none. */
+  zones: Zone[];
+  /** Spot id to the spot. */
+  spots: ReadonlyMap<string, Spot>;
+  /** Extras group id to the group. */
+  extraGroups: ReadonlyMap<string, ExtraGroup>;
 }
 
 export interface RawConfig {
   business: unknown;
   catalog: unknown;
   stations: unknown;
+  /** `spots.json`; optional. */
+  spots?: unknown;
 }
 
 /** A config file is wrong: names the file, the field path, what was expected and what was found. */
@@ -110,6 +178,7 @@ export class ConfigError extends Error {
 const ID = /^[a-z0-9][a-z0-9-]*$/;
 export const DEFAULT_MAX_QTY = 99;
 export const DEFAULT_RETENTION_DAYS = 30;
+export const DEFAULT_LATE_MINUTES = 6;
 
 function describe(value: unknown): string {
   if (value === undefined) return "nothing";
@@ -164,6 +233,14 @@ class Reader {
     return value;
   }
 
+  /** Like `minor` but 0 is allowed: a free option. */
+  minorOrZero(value: unknown, field: string): number {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+      this.fail(field, "a price in integer minor units (such as cents), 0 or more", value);
+    }
+    return value;
+  }
+
   boolean(value: unknown, field: string): boolean {
     if (typeof value !== "boolean") this.fail(field, "true or false", value);
     return value;
@@ -182,9 +259,12 @@ const BUSINESS_FIELDS = [
   "timeZone",
   "maxQtyPerLine",
   "retentionDays",
+  "lateMinutes",
   "cashShortcuts",
   "hours",
   "showcase",
+  "card",
+  "managerRefundLimit",
   "phone",
   "address",
 ];
@@ -224,7 +304,15 @@ export function parseBusiness(raw: unknown, file = "business.json"): Business {
     }
     retentionDays = d;
   }
-  const business: Business = { name, currency, timeZone, maxQtyPerLine, retentionDays };
+  let lateMinutes = DEFAULT_LATE_MINUTES;
+  if (o.lateMinutes !== undefined) {
+    const m = o.lateMinutes;
+    if (typeof m !== "number" || !Number.isInteger(m) || m < 1 || m > 120) {
+      return r.fail("lateMinutes", "a whole number of minutes from 1 to 120", m);
+    }
+    lateMinutes = m;
+  }
+  const business: Business = { name, currency, timeZone, maxQtyPerLine, retentionDays, lateMinutes };
   if (o.cashShortcuts !== undefined) {
     const exp = minorExponent(currency);
     const expected = `an amount above 0 in major units of ${currency} with at most ${exp} decimals`;
@@ -239,11 +327,31 @@ export function parseBusiness(raw: unknown, file = "business.json"): Business {
   }
   if (o.hours !== undefined) {
     const h = r.object(o.hours, "hours");
-    const hours = parseHours(h.open, h.close);
-    if (hours === undefined) return r.fail("hours", "{open, close} as HH:MM, 24 hour, such as 07:00", o.hours);
+    const hours = parseHours(h.open, h.close, h.lastOrder, h.closedDays);
+    if (hours === undefined) {
+      return r.fail(
+        "hours",
+        '{open, close, lastOrder?, closedDays?}: HH:MM, 24 hour, lastOrder inside the open hours, closedDays some of "mon" to "sun"',
+        o.hours,
+      );
+    }
     business.hours = hours;
   }
   if (o.showcase !== undefined) business.showcase = r.boolean(o.showcase, "showcase");
+  if (o.card !== undefined) business.card = r.boolean(o.card, "card");
+  if (o.managerRefundLimit !== undefined) {
+    const exp = minorExponent(currency);
+    const v = o.managerRefundLimit;
+    const minor = typeof v === "number" ? Math.round(v * 10 ** exp) : Number.NaN;
+    if (typeof v !== "number" || !Number.isSafeInteger(minor) || minor <= 0 || minor / 10 ** exp !== v) {
+      return r.fail(
+        "managerRefundLimit",
+        `an amount above 0 in major units of ${currency} with at most ${exp} decimals`,
+        v,
+      );
+    }
+    business.managerRefundLimitMinor = minor;
+  }
   if (o.phone !== undefined) business.phone = r.string(o.phone, "phone");
   if (o.address !== undefined) business.address = r.string(o.address, "address");
   return business;
@@ -284,7 +392,48 @@ function parseItem(r: Reader, raw: unknown, field: string): CatalogItem {
     item.diet = o.diet as Diet;
   }
   if (o.available !== undefined) item.available = r.boolean(o.available, `${field}.available`);
+  if (o.extras !== undefined) item.extras = idList(r, o.extras, `${field}.extras`);
+  if (o.station !== undefined) item.station = r.id(o.station, `${field}.station`);
   return item;
+}
+
+function idList(r: Reader, raw: unknown, field: string): string[] {
+  const seen = new Set<string>();
+  return r.array(raw, field, true).map((v, i) => {
+    const id = r.id(v, `${field}[${i}]`);
+    r.unique(seen, id, `${field}[${i}]`, "group id");
+    return id;
+  });
+}
+
+function parseExtraGroups(r: Reader, raw: unknown, field: string): ExtraGroup[] {
+  const groupIds = new Set<string>();
+  const optionIds = new Set<string>();
+  return r.array(raw, field, true).map((g, gi) => {
+    const gf = `${field}[${gi}]`;
+    const go = r.object(g, gf);
+    const id = r.id(go.id, `${gf}.id`);
+    r.unique(groupIds, id, `${gf}.id`, "extras group id");
+    const name = r.string(go.name, `${gf}.name`);
+    const options = r.array(go.options, `${gf}.options`, true).map((o, oi): ExtraOption => {
+      const of = `${gf}.options[${oi}]`;
+      const oo = r.object(o, of);
+      const oid = r.id(oo.id, `${of}.id`);
+      r.unique(optionIds, oid, `${of}.id`, "option id across all extras groups");
+      return { id: oid, name: r.string(oo.name, `${of}.name`), price: r.minorOrZero(oo.price, `${of}.price`) };
+    });
+    const count = (v: unknown, f: string, lo: number, fallback: number): number => {
+      if (v === undefined) return fallback;
+      if (typeof v !== "number" || !Number.isInteger(v) || v < lo || v > options.length) {
+        return r.fail(f, `a whole number from ${lo} to ${options.length} (the group's options)`, v);
+      }
+      return v;
+    };
+    const min = count(go.min, `${gf}.min`, 0, 0);
+    const max = count(go.max, `${gf}.max`, 1, options.length);
+    if (min > max) r.failText(`${gf}.min`, `a min up to the max (${max})`, String(min));
+    return { id, name, min, max, options };
+  });
 }
 
 export function parseCatalog(raw: unknown, file = "catalog.json"): Catalog {
@@ -292,6 +441,27 @@ export function parseCatalog(raw: unknown, file = "catalog.json"): Catalog {
   const o = r.object(raw, "");
   const categoryIds = new Set<string>();
   const itemIds = new Set<string>();
+  const filterIds = new Set<string>();
+  const filters =
+    o.filters === undefined
+      ? undefined
+      : r.array(o.filters, "filters", true).map((f, i): MenuFilter => {
+          const ff = `filters[${i}]`;
+          const fo = r.object(f, ff);
+          const id = r.id(fo.id, `${ff}.id`);
+          r.unique(filterIds, id, `${ff}.id`, "filter id");
+          const mode: unknown = fo.mode === undefined ? "include" : fo.mode;
+          if (mode !== "include" && mode !== "exclude") return r.fail(`${ff}.mode`, '"include" or "exclude"', mode);
+          return { id, name: r.string(fo.name, `${ff}.name`), tag: r.string(fo.tag, `${ff}.tag`), mode };
+        });
+  const extras = o.extras === undefined ? undefined : parseExtraGroups(r, o.extras, "extras");
+  const known = new Set((extras ?? []).map((g) => g.id));
+  const knownGroups = (ids: string[], field: string): string[] => {
+    ids.forEach((id, i) => {
+      if (!known.has(id)) r.fail(`${field}[${i}]`, "a group id from the catalog's extras", id);
+    });
+    return ids;
+  };
   const categories = r.array(o.categories, "categories", true).map((c, ci) => {
     const cf = `categories[${ci}]`;
     const co = r.object(c, cf);
@@ -300,6 +470,7 @@ export function parseCatalog(raw: unknown, file = "catalog.json"): Catalog {
     const name = r.string(co.name, `${cf}.name`);
     const items = r.array(co.items, `${cf}.items`).map((it, ii) => {
       const item = parseItem(r, it, `${cf}.items[${ii}]`);
+      if (item.extras) knownGroups(item.extras, `${cf}.items[${ii}].extras`);
       r.unique(itemIds, item.id, `${cf}.items[${ii}].id`, "item id across the catalog");
       return item;
     });
@@ -310,9 +481,14 @@ export function parseCatalog(raw: unknown, file = "catalog.json"): Catalog {
         return r.fail(`${cf}.icon`, "a bundled icon name", co.icon);
       category.icon = icon;
     }
+    if (co.extras !== undefined) category.extras = knownGroups(idList(r, co.extras, `${cf}.extras`), `${cf}.extras`);
     return category;
   });
-  return { categories };
+  return {
+    categories,
+    ...(extras === undefined ? {} : { extras }),
+    ...(filters === undefined ? {} : { filters }),
+  };
 }
 
 /** Stations are validated against the catalog: every category maps to exactly one station. */
@@ -355,19 +531,84 @@ export function parseStations(raw: unknown, catalog: Catalog, file = "stations.j
     if (!owner.has(cat))
       r.failText("", "a station for every catalog category", `no station for ${JSON.stringify(cat)}`);
   }
+  for (const c of catalog.categories) {
+    for (const item of c.items) {
+      if (item.station !== undefined && !stationIds.has(item.station)) {
+        throw new ConfigError(
+          "catalog.json",
+          `item ${item.id}.station`,
+          `a station id from ${file}`,
+          JSON.stringify(item.station),
+        );
+      }
+    }
+  }
   return stations;
 }
 
-/** Validates all three files together; throws ConfigError on the first problem. */
+/**
+ * `spots.json`: an array of zones (empty when the business has no spots), each `{id, name}` with either `spots: ["Hammock", "Corner"]` or `count: 12` (and an
+ * optional `prefix`, so `prefix: "T", count: 3` is T1, T2, T3). A spot's label is the zone's name and its own: "Garden T4".
+ */
+export function parseSpots(raw: unknown, file = "spots.json"): Zone[] {
+  const r = new Reader(file);
+  const zoneIds = new Set<string>();
+  const spotIds = new Set<string>();
+  const labels = new Set<string>();
+  return r.array(raw, "").map((z, zi): Zone => {
+    const zf = `[${zi}]`;
+    const zo = r.object(z, zf);
+    const id = r.id(zo.id, `${zf}.id`);
+    r.unique(zoneIds, id, `${zf}.id`, "zone id");
+    const name = r.string(zo.name, `${zf}.name`);
+    if (zo.kind !== undefined && zo.kind !== "room" && zo.kind !== "table") {
+      r.fail(`${zf}.kind`, '"room" or "table" (the default)', zo.kind);
+    }
+    if ((zo.spots !== undefined) === (zo.count !== undefined)) {
+      r.failText(zf, "exactly one of spots or count", zo.spots === undefined ? "neither" : "both");
+    }
+    let own: string[];
+    if (zo.spots !== undefined) {
+      own = r.array(zo.spots, `${zf}.spots`, true).map((s, i) => r.string(s, `${zf}.spots[${i}]`));
+    } else {
+      const n = zo.count;
+      if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > 500) {
+        return r.fail(`${zf}.count`, "a whole number from 1 to 500", n);
+      }
+      const prefix = zo.prefix === undefined ? "" : r.string(zo.prefix, `${zf}.prefix`);
+      own = Array.from({ length: n }, (_, i) => `${prefix}${i + 1}`);
+    }
+    const spots = own.map((label, i): Spot => {
+      const slug = label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+      const field = `${zf}.spots[${i}]`;
+      if (slug === "") r.fail(field, "a label with a letter or digit", label);
+      const spot = { id: `${id}-${slug}`, label: `${name} ${label}` };
+      r.unique(spotIds, spot.id, field, "spot within the config");
+      r.unique(labels, spot.label, field, "spot label");
+      return spot;
+    });
+    return zo.kind === "room" ? { id, name, kind: "room", spots } : { id, name, spots };
+  });
+}
+
+/** Validates all the files together; throws ConfigError on the first problem. */
 export function loadConfig(raw: RawConfig): Config {
   const business = parseBusiness(raw.business);
   const catalog = parseCatalog(raw.catalog);
   const stations = parseStations(raw.stations, catalog);
+  const zones = raw.spots === undefined ? [] : parseSpots(raw.spots);
+  const spots = new Map<string, Spot>();
+  for (const z of zones) for (const s of z.spots) spots.set(s.id, s);
+  const extraGroups = new Map<string, ExtraGroup>();
+  for (const g of catalog.extras ?? []) extraGroups.set(g.id, g);
   const items = new Map<string, { item: CatalogItem; categoryId: string }>();
   for (const c of catalog.categories) for (const item of c.items) items.set(item.id, { item, categoryId: c.id });
   const stationByCategory = new Map<string, Station>();
   for (const s of stations) for (const c of s.categories) stationByCategory.set(c, s);
-  return { business, catalog, stations, items, stationByCategory };
+  return { business, catalog, stations, items, stationByCategory, zones, spots, extraGroups };
 }
 
 /**
@@ -396,9 +637,33 @@ export function stationFor(config: Config, itemId: string): Station {
   if (entry === undefined) {
     throw new Error(`stationFor: expected an item id from the catalog, found ${JSON.stringify(itemId)}`);
   }
+  if (entry.item.station !== undefined) {
+    const own = config.stations.find((s) => s.id === entry.item.station);
+    if (own === undefined) {
+      throw new Error(`stationFor: expected station ${JSON.stringify(entry.item.station)} of ${itemId}, found none`);
+    }
+    return own;
+  }
   const station = config.stationByCategory.get(entry.categoryId);
   if (station === undefined) {
     throw new Error(`stationFor: expected a station for category ${JSON.stringify(entry.categoryId)}, found none`);
   }
   return station;
+}
+
+/** The extras groups offered on an item: its category's first, then its own, each once. Empty when it takes none. */
+export function extraGroupsFor(config: Config, itemId: string): ExtraGroup[] {
+  const entry = config.items.get(itemId);
+  if (entry === undefined) return [];
+  const category = config.catalog.categories.find((c) => c.id === entry.categoryId);
+  const ids = [...new Set([...(category?.extras ?? []), ...(entry.item.extras ?? [])])];
+  return ids.flatMap((id) => {
+    const g = config.extraGroups.get(id);
+    return g === undefined ? [] : [g];
+  });
+}
+
+/** Whether a spot id is a room: a spot of a zone of kind `room` in `spots.json` (D-082). */
+export function isRoom(config: Pick<Config, "zones">, spotId: string): boolean {
+  return config.zones.some((z) => z.kind === "room" && z.spots.some((s) => s.id === spotId));
 }

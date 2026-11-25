@@ -164,3 +164,25 @@ describe("theme.css", () => {
     expect(css).toContain('--hdr-image:url("/media/banner.jpg")');
   });
 });
+
+describe("the premium layer (D-070)", () => {
+  test("a display face, photo-only tiles and the featured strip are opt-in, and their values are checked", () => {
+    const d = parseTheme({});
+    expect(d.display).toBeUndefined();
+    expect(d.features.tiles).toBe("always");
+    expect(d.features.featured).toBe(false);
+    const t = parseTheme({ font: "inter", display: "fraunces", features: { tiles: "photos", featured: true } });
+    expect(t.display).toBe("fraunces");
+    expect(t.features).toMatchObject({ tiles: "photos", featured: true });
+    expect(() => parseTheme({ display: "comic" })).toThrow(/display/);
+    expect(() => parseTheme({ features: { tiles: "sometimes" } })).toThrow(/features\.tiles/);
+  });
+
+  test("theme.css loads the display face once beside the body face and names it --font-display", () => {
+    const css = themeCss(parseTheme({ font: "inter", display: "fraunces" }));
+    expect(css).toContain('font-family:"ibow-fraunces"');
+    expect(css).toContain('font-family:"ibow-inter"');
+    expect(css).toMatch(/--font-display:"ibow-fraunces", Georgia/);
+    expect(themeCss(parseTheme({ font: "lora" })).match(/@font-face/g)).toHaveLength(1);
+  });
+});

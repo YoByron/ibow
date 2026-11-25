@@ -4,7 +4,7 @@
  * no network: everything is local (D-034).
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,6 +70,9 @@ function bundle(dir: string, demo: boolean): Promise<string> {
         "ibow-business": join(dir, "business.json"),
         "ibow-catalog": join(dir, "catalog.json"),
         "ibow-stations": join(dir, "stations.json"),
+        "ibow-spots": existsSync(join(dir, "spots.json"))
+          ? join(dir, "spots.json")
+          : join(root, "src/worker/no-spots.json"),
         "ibow-look": look,
         "ibow-rush": demo ? join(dir, "rush.json") : join(root, "src/worker/no-rush.json"),
         "ibow-demo-bundle": join(root, demo ? "src/worker/demo-bundle.json" : "src/worker/no-demo-bundle.json"),

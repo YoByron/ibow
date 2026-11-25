@@ -30,6 +30,8 @@ function buildId(env: Bindings): Promise<string> {
 }
 
 const INSTALL = "install";
+let showcaseOn = false;
+let showcaseAt = 0;
 /** The showcase page and everything it loads; the Worker runs first for these (`/showcase*` in wrangler.toml). */
 const isShowcasePath = (p: string) => p === "/showcase" || p.startsWith("/showcase.") || p.startsWith("/showcase/");
 /** The policy of every page, with the https image hosts the config names (the static pages get it from `_headers`). */
@@ -67,6 +69,8 @@ export default {
         manifest(config.business.name, color.ok ? await color.text() : looks.theme.colors.header),
       );
     }
+    // A demo is never a business's real ordering page: its pages ask search engines not to list them (D-062).
+    const robots: Record<string, string> = env.DEMO === "1" ? { "x-robots-tag": "noindex, nofollow" } : {};
     // A demo ignores AI_* (D-040), so its owner page never links the analyst's script.
     const ai = env.DEMO !== "1" && aiSettings(strings(env)) !== undefined;
     if (url.pathname === ANALYST_SCRIPT && !ai) return new Response("not found", { status: 404 });
@@ -74,12 +78,20 @@ export default {
     if (demoBundle && env.DEMO === "1" && (url.pathname === "/" || url.pathname === "/index.html")) {
       const page = await env.ASSETS.fetch(new Request(new URL("/", url)));
       if (!page.ok) return page;
-      return fileFor("text/html; charset=utf-8", withDemoLabel(await page.text()), { "content-security-policy": CSP });
+      return fileFor("text/html; charset=utf-8", withDemoLabel(await page.text()), {
+        "content-security-policy": CSP,
+        ...robots,
+      });
     }
     if (isShowcasePath(url.pathname)) {
-      // A demo shows it by default; a real install only with `showcase: true` in business.json (D-055).
-      const on = (demoBundle && env.DEMO === "1") || config.business.showcase === true;
-      return on ? env.ASSETS.fetch(request) : new Response("not found", { status: 404 });
+      // A demo shows it by default; a real install only with `showcase: true` in business.json (D-055), or the admin's switch
+      // (D-075), which the install object holds: asked at most every half minute, not on each of the page's files.
+      if (Date.now() - showcaseAt > 30_000) {
+        const answer = await install().fetch(new Request(new URL("/__showcase", url)));
+        showcaseOn = answer.ok && (await answer.text()) === "1";
+        showcaseAt = Date.now();
+      }
+      return showcaseOn ? env.ASSETS.fetch(request) : new Response("not found", { status: 404 });
     }
     if (url.pathname === "/owner") {
       const page = await env.ASSETS.fetch(new Request(new URL("/owner", url)));
@@ -87,6 +99,7 @@ export default {
       const html = await page.text();
       return fileFor("text/html; charset=utf-8", ai ? withAnalystScript(html) : html, {
         "content-security-policy": CSP,
+        ...robots,
       });
     }
     return env.ASSETS.fetch(request);

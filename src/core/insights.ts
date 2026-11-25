@@ -10,10 +10,13 @@
  * shows as awaiting, never as received.
  */
 
-import type { Order, OrderLine } from "./orders.ts";
+import { type Order, type OrderLine, onOpenRoomBill } from "./orders.ts";
 import type { PaymentMethod } from "./payments.ts";
 
-/** Money a person confirmed for an order: the confirmation and each top-up, at the time each was confirmed. */
+/**
+ * Money a person confirmed for an order: the confirmation and each top-up, at the time each was confirmed. A refund is a
+ * receipt with a negative amount at the time it was handed back, so every total nets it on its own day and method.
+ */
 export interface Receipt {
   amountMinor: number;
   at: number;
@@ -26,6 +29,8 @@ export interface Sale {
   createdAt: number;
   lines: readonly Pick<OrderLine, "itemId" | "name" | "size" | "qty" | "unitMinor">[];
   received: readonly Receipt[];
+  /** On a room bill not yet settled: owed at checkout, not awaiting a confirmation (D-082), so Awaiting leaves it out. */
+  onRoomBill?: true;
 }
 
 /** The parts of an order insights read. A claim counts for nothing: only a confirmed payment is money received. */
@@ -38,9 +43,11 @@ export function saleOf(order: Order): Sale {
     received.push(
       { amountMinor: base, at: p.at, method: p.method },
       ...topUps.map((t) => ({ amountMinor: t.amountMinor, at: t.at, method: t.method })),
+      ...(p.refunds ?? []).map((r) => ({ amountMinor: -r.amountMinor, at: r.at, method: r.method })),
     );
   }
-  return { createdAt: order.createdAt, lines: order.lines, received };
+  const sale: Sale = { createdAt: order.createdAt, lines: order.lines, received };
+  return onOpenRoomBill(order) ? { ...sale, onRoomBill: true } : sale;
 }
 
 export interface LocalTime {
@@ -130,6 +137,7 @@ export interface DayTotals {
   /** The part of it staff confirmed as cash and as UPI; a receipt with no recorded method counts in neither. */
   receivedCashMinor: number;
   receivedUpiMinor: number;
+  receivedCardMinor: number;
   /** Orders placed in the day whose confirmed money doesn't cover them yet, and what they still owe. */
   awaitingOrders: number;
   awaitingMinor: number;
@@ -247,6 +255,7 @@ export function dayTotals(sales: readonly Sale[], day: string, timeZone: string,
   let receivedMinor = 0;
   let receivedCashMinor = 0;
   let receivedUpiMinor = 0;
+  let receivedCardMinor = 0;
   let awaitingOrders = 0;
   let awaitingMinor = 0;
   for (const s of sales) {
@@ -255,14 +264,15 @@ export function dayTotals(sales: readonly Sale[], day: string, timeZone: string,
       receivedMinor += r.amountMinor;
       if (r.method === "cash") receivedCashMinor += r.amountMinor;
       else if (r.method === "upi") receivedUpiMinor += r.amountMinor;
+      else if (r.method === "card") receivedCardMinor += r.amountMinor;
     }
     if (!within(s.createdAt)) continue;
     const value = total(s);
     orders++;
     items += units(s);
     orderedMinor += value;
-    const owed = value - s.received.reduce((n, r) => n + r.amountMinor, 0);
-    if (owed > 0) {
+    const owed = value - s.received.reduce((n, r) => (r.amountMinor > 0 ? n + r.amountMinor : n), 0);
+    if (owed > 0 && s.onRoomBill !== true) {
       awaitingOrders++;
       awaitingMinor += owed;
     }
@@ -276,6 +286,7 @@ export function dayTotals(sales: readonly Sale[], day: string, timeZone: string,
     receivedMinor,
     receivedCashMinor,
     receivedUpiMinor,
+    receivedCardMinor,
     awaitingOrders,
     awaitingMinor,
   };
@@ -366,6 +377,7 @@ export interface MinuteSlot {
   /** The part of it confirmed as cash and as UPI. */
   receivedCashMinor: number;
   receivedUpiMinor: number;
+  receivedCardMinor: number;
 }
 
 /**
@@ -493,6 +505,7 @@ export function statsFromSales(sales: readonly Sale[], day: string, timeZone: st
   let receivedMinor = 0;
   let receivedCashMinor = 0;
   let receivedUpiMinor = 0;
+  let receivedCardMinor = 0;
   let awaitingOrders = 0;
   let awaitingMinor = 0;
   const within = (at: number) => {
@@ -505,6 +518,7 @@ export function statsFromSales(sales: readonly Sale[], day: string, timeZone: st
       receivedMinor += r.amountMinor;
       if (r.method === "cash") receivedCashMinor += r.amountMinor;
       else if (r.method === "upi") receivedUpiMinor += r.amountMinor;
+      else if (r.method === "card") receivedCardMinor += r.amountMinor;
     }
     const t = localTime(s.createdAt, timeZone);
     if (t.day !== day || minutes(t) > untilMinute) continue;
@@ -517,7 +531,7 @@ export function statsFromSales(sales: readonly Sale[], day: string, timeZone: st
     b.orders++;
     b.items += qty;
     b.orderedMinor += value;
-    const owed = value - s.received.reduce((n, r) => n + r.amountMinor, 0);
+    const owed = value - s.received.reduce((n, r) => (r.amountMinor > 0 ? n + r.amountMinor : n), 0);
     if (owed > 0) {
       awaitingOrders++;
       awaitingMinor += owed;
@@ -545,6 +559,7 @@ export function statsFromSales(sales: readonly Sale[], day: string, timeZone: st
     receivedMinor,
     receivedCashMinor,
     receivedUpiMinor,
+    receivedCardMinor,
     awaitingOrders,
     awaitingMinor,
     hourly,
@@ -560,6 +575,7 @@ export function recordUpTo(r: DayRecord, untilMinute: number): DayStats {
   let receivedMinor = 0;
   let receivedCashMinor = 0;
   let receivedUpiMinor = 0;
+  let receivedCardMinor = 0;
   let awaitingOrders = 0;
   let awaitingMinor = 0;
   for (const s of r.minutes) {
@@ -570,6 +586,7 @@ export function recordUpTo(r: DayRecord, untilMinute: number): DayStats {
     receivedMinor += s.receivedMinor;
     receivedCashMinor += s.receivedCashMinor;
     receivedUpiMinor += s.receivedUpiMinor;
+    receivedCardMinor += s.receivedCardMinor ?? 0;
     awaitingOrders += s.awaitingOrders;
     awaitingMinor += s.awaitingMinor;
   }
@@ -582,6 +599,7 @@ export function recordUpTo(r: DayRecord, untilMinute: number): DayStats {
     receivedMinor,
     receivedCashMinor,
     receivedUpiMinor,
+    receivedCardMinor,
     awaitingOrders,
     awaitingMinor,
     hourly: [],
@@ -590,7 +608,16 @@ export function recordUpTo(r: DayRecord, untilMinute: number): DayStats {
 }
 
 function totalsOf(d: DayStats): DayTotals {
-  const { orders, items, orderedMinor, averageMinor, receivedMinor, receivedCashMinor, receivedUpiMinor } = d;
+  const {
+    orders,
+    items,
+    orderedMinor,
+    averageMinor,
+    receivedMinor,
+    receivedCashMinor,
+    receivedUpiMinor,
+    receivedCardMinor,
+  } = d;
   const { awaitingOrders, awaitingMinor } = d;
   return {
     orders,
@@ -600,6 +627,7 @@ function totalsOf(d: DayStats): DayTotals {
     receivedMinor,
     receivedCashMinor,
     receivedUpiMinor,
+    receivedCardMinor,
     awaitingOrders,
     awaitingMinor,
   };

@@ -48,6 +48,6 @@ describe("300-order rush", () => {
     expect(total(tea)).toBeGreaterThan(0);
     expect(total(kitchen)).toBeGreaterThan(0);
     const text = renderBatch(tea, BATCH_TEMPLATES.en as BatchTemplate);
-    expect(text).toMatch(/^Tokens 26-\d{3}(, 26-\d{3})* \d+ [A-Za-z][^,]*( [SML])?(, \d+ [A-Za-z][^,]*)*$/);
+    expect(text).toMatch(/^Orders #\d+(, #\d+)* \d+ [A-Za-z][^,]*( [SML])?(, \d+ [A-Za-z][^,]*)*$/);
   });
 });

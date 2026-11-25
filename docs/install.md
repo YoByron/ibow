@@ -82,6 +82,11 @@ images are optional extras that some samples carry; empty `config/` first if it 
   category goes to exactly one station. `view` is `batch` (open items totalled and read out as one list, the default)
   or `jobs` (one card per order, for work that belongs to one customer); `speak` reads arrivals aloud; `print` is
   `"ticket-80mm"` or `null`.
+- **`spots.json`** (optional; `[]` on Cloudflare when you have none): where customers sit, as zones with a `count` (and a
+  `prefix`) or a list of `spots`. The owner's Spots page prints a QR per spot that opens the menu with it chosen. A
+  catalog may also hold `extras` (groups of options priced onto an item), `filters` (diet chips from tags), and an item
+  may name its own `station`. `business.json` takes `hours.lastOrder` and `lateMinutes`. A venue example is
+  `samples/garden-cafe`.
 
 The full contract is in [architecture.md](architecture.md#contracts). If a file is wrong, the server refuses to start
 (on Cloudflare, `wrangler deploy` fails) and says which file and field. An edit to these files takes effect at the next
@@ -99,6 +104,8 @@ npm run hash-pin       # type the owner's PIN (4 to 12 digits); it prints a hash
 | Setting | What to put |
 |---|---|
 | `OWNER_PIN_HASH` | Required. The output of `npm run hash-pin`. To change the PIN, make a new hash and set it again. |
+| `ADMIN_PIN_HASH` | Optional: the system admin's own PIN, made the same way (`npm run hash-pin`, a different PIN from the owner's). On Cloudflare: `npx wrangler secret put ADMIN_PIN_HASH`. The admin signs in at `/admin` as `admin` and sees the install's health and the system switches, never customers or sales. Unset, nobody can sign in as admin. |
+| `BACKUP_DIR` | Optional, plain Node: the folder you write `npm run backup` files into. The admin's health page shows the newest file's time as the last backup. On Cloudflare the page shows the time of the last export instead. |
 | `UPI_VPA` | INR businesses only: the shop's UPI ID (`yourbusiness@upi`), so customers can pay by UPI QR or app. Leave it unset to offer only "pay at the counter". ibow never marks money received by itself: staff confirm each payment. |
 | `UPI_PAYEE_NAME` | The payee name shown in the customer's UPI app (default: the business name). |
 | `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY`, `AI_TIMEOUT_SECONDS` | Optional: the AI business analyst ([below](#the-ai-business-analyst-optional)). Leave them unset and it stays off. |

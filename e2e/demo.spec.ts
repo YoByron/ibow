@@ -98,5 +98,5 @@ test("npm run demo prints the URLs and PINs, and they open a seeded dashboard, c
   await addSized(customer, "House Special Chai", "M");
   await customer.getByTestId("cart-bar").click();
   await customer.getByRole("button", { name: "Place order" }).click();
-  await expect(customer.getByTestId("token")).toHaveText(/^\d{2}-\d{3}$/);
+  await expect(customer.getByTestId("token")).toHaveText(/^#\d+$/);
 });

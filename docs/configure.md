@@ -17,6 +17,8 @@ before you change anything; edit those files. Three are required and the rest op
 | `business.json` | yes | Who the business is: name, currency, time zone, hours, cash buttons, how long names are kept |
 | `catalog.json` | yes | What it sells: categories, items, sizes, prices, photos, icons |
 | `stations.json` | yes | Where the work happens and which categories go to which station |
+| `spots.json` | no | Where customers sit, and the rooms a business lets ([below](#spotsjson)) |
+| `events.json` | no | Events to start the calendar with: markets, music nights, busy days ([below](#eventsjson)) |
 | `theme.json` | no | The look: colours, typeface, corners, header, logo, icons, feature switches |
 | `strings.<locale>.json` | no | Your own wording for the customer screens, per language (`strings.hi.json`) |
 | image files | no | Photos and logos that the files above name (`png`, `jpg`, `jpeg`, `webp`, `svg`) |
@@ -57,6 +59,7 @@ with no minor unit (JPY) the price is in whole yen.
   "retentionDays": 30,
   "maxQtyPerLine": 99,
   "showcase": false,
+  "card": false,
   "phone": "+91 00000 00000",
   "address": "Example Street, Example City"
 }
@@ -68,10 +71,12 @@ with no minor unit (JPY) the price is in whole yen.
 | `currency` | yes | An ISO 4217 code: `INR`, `USD`, `EUR`, `AED`, `GBP`... No default. Every price and payment is in its minor unit. |
 | `timeZone` | yes | An IANA zone: `Asia/Kolkata`, `America/New_York`, `Europe/Lisbon`... No default. The business's "day" (token numbers restart each day, reports start and end at midnight) follows it, not the server's clock. |
 | `cashShortcuts` | no | The cash notes the counter offers as one-tap "received" buttons, in whole units of the currency, such as `[5, 10, 20, 50]`. At least one entry, each above 0, with no more decimals than the currency has. Left out, the counter works the buttons out from the amount due. |
-| `hours` | no | `{"open": "07:00", "close": "22:00"}`, 24-hour `HH:MM`, in the business's time zone. A close earlier than the open means past midnight (`18:00` to `02:00`). The storefront then says "Open now" or "Closed". It is a label only: it does not stop anyone ordering. Without `hours` the storefront says nothing about it. |
+| `hours` | no | `{"open": "07:00", "close": "22:00", "lastOrder": "21:30", "closedDays": ["mon"]}`, 24-hour `HH:MM`, in the business's time zone. A close earlier than the open means past midnight (`18:00` to `02:00`). The storefront says "Open now" or "Closed". `lastOrder` (optional) stops new orders after that time, on the storefront and the server, while the doors stay open. `closedDays` (optional) are whole days shut, as `"mon"` to `"sun"`: no orders, and the storefront says which day it opens again. Without `lastOrder` or `closedDays` the hours are a label only. Without `hours` the storefront says nothing about it. |
 | `retentionDays` | no | Whole days, 1 to 3650, default 30. Customer names and review text are cleared after this many days. Phone numbers are never collected. |
 | `maxQtyPerLine` | no | Most units of one item in one order line, 1 to 10000, default 99. |
 | `showcase` | no | `true` serves ibow's own showcase page at `/showcase` (a marketing page about ibow, with the author's consultancy contact). Default `false`: a real shop's customers see a 404 there. The public demo always serves it. |
+| `card` | no | `true` lets staff record card payments (a terminal at the counter): a Card button beside Cash and UPI, and a card line in the day's split. Default `false`. ibow never touches the card; a person confirms it, as with cash. |
+| `managerRefundLimit` | no | The most a manager may hand back on one order, in major units of the currency (above 0, with no more decimals than the currency has). Left out, managers may not refund; the owner always may. |
 | `phone`, `address` | no | Free text. They are checked and kept with the business but no screen shows them today. |
 
 ## catalog.json
@@ -134,16 +139,16 @@ content security policy automatically. A file that the config names but is missi
 
 ### Bundled icons
 
-`icon` fields (and `logo` and `categoryIcons` in the theme) take one of these names, the 3D Fluent set that ships with
-ibow:
+`icon` fields (and `logo` and `categoryIcons` in the theme) take one of these names, the line icon set drawn for ibow
+(coloured by the theme):
 
 ```text
 bank, bar_chart, bell, bento_box, beverage_box, bubble_tea, chart_increasing, check_mark_button, cheese_wedge,
-chequered_flag, clipboard, cocktail_glass, cooking, counterclockwise_arrows_button, credit_card, crescent_moon,
+cake, chequered_flag, clipboard, cocktail_glass, cooking, counterclockwise_arrows_button, credit_card, crescent_moon,
 croissant, cup_with_straw, dollar_banknote, dumpling, ear_of_corn, face_savoring_food, fire, fork_and_knife_with_plate,
 french_fries, hamburger, honey_pot, hot_beverage, hot_pepper, hourglass_not_done, ice, leaf_fluttering_in_wind, lemon,
-locked, magnifying_glass_tilted_left, megaphone, mobile_phone, money_bag, party_popper, peach, pot_of_food, receipt,
-sandwich, shopping_cart, spaghetti, sparkles, speaker_high_volume, star, steaming_bowl, stopwatch, takeout_box,
+locked, map_pin, magnifying_glass_tilted_left, megaphone, mobile_phone, money_bag, pancakes, party_popper, peach, pot_of_food, receipt, salad,
+sandwich, shopping_cart, spaghetti, sparkles, speaker_high_volume, star, steaming_bowl, stopwatch, sun, takeout_box,
 teacup_without_handle, teapot, thinking_face, ticket, tropical_drink, watermelon, wrapped_gift
 ```
 
@@ -171,6 +176,70 @@ with at least one station:
 | `view` | no | `"batch"` (the default): open items are totalled across orders and read out as one list ("12 Masala Chai M, 3 Hot Coffee"). `"jobs"`: one card per order, for work that belongs to one customer, such as a repair. |
 
 `speak` and `print` are required even when you want them off (`false` and `null`); only `view` has a default.
+
+## spots.json
+
+Where customers sit: tables, benches, corners and, for a business that also lets rooms, its rooms. Optional; without it
+the storefront doesn't ask. It is an array of zones, each with either a list of spot names or a count:
+
+```json
+[
+  { "id": "garden", "name": "Garden", "prefix": "T", "count": 14 },
+  { "id": "other", "name": "Elsewhere", "spots": ["Hammock", "Bench by the gate"] },
+  { "id": "rooms", "name": "Room", "kind": "room", "count": 6 }
+]
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `id` | yes | Unique zone id. A spot's id is `<zone id>-<spot>` (`garden-t4`, `rooms-3`); its QR opens `/?spot=<spot id>`. |
+| `name` | yes | Shown before each spot: "Garden T4", "Room 3". |
+| `count` or `spots` | one of them | `count` numbers the spots 1 to `count` (with `prefix`: T1, T2…); `spots` names them. |
+| `prefix` | no | Put before each number of a `count` zone. |
+| `kind` | no | `"table"` (the default) or `"room"`: the spots are rooms a business lets. |
+
+**Rooms.** A guest who scans the QR in their room may choose "Add to my room bill": the order stays unpaid (never counted
+as received) until staff settle the room at checkout on the Rooms screen, in one cash, UPI or card payment. Only that
+room's own QR can do this: its link carries a key (`/?spot=rooms-3&key=…`) that the install makes from a secret of its own,
+so nobody can charge a room by typing its number. Print the room QRs from the owner's **Spots** page, which puts the key in
+each one; a plain `/?spot=rooms-3` link still sets the spot but never offers the room bill (except on a demo, which
+publishes its keys). The keys stay the same each time you print and differ from any other install's. A key does not
+expire, so a guest who has checked out could keep a photo of the QR: press **New QR** on that room's tile in Spots and
+the old code stops working at once; print the new card and replace the old one. Staff can take an
+order put on the wrong room off its bill on the Rooms screen; it is then paid at the counter like any other. Rooms also
+work for café guests who don't stay: they simply pay the usual way.
+
+## events.json
+
+The business's events, to start the calendar with. Optional; owners and managers add, change and delete events on the
+owner's **Events** tab and the manager's screen, and this file is read only once (an event you delete later never comes
+back). Dates and times are business-local.
+
+```json
+[
+  { "title": "Flea market", "date": "2026-12-05", "start": "10:00", "end": "16:00", "rush": true },
+  { "title": "Folk dance", "date": "2026-12-06", "start": "16:30", "repeat": { "weekdays": ["sun"] },
+    "price": 700, "note": "Entry at the gate" },
+  { "title": "Late jazz", "date": "2026-12-12", "start": "21:00", "end": "01:00" },
+  { "title": "Big delivery", "date": "2026-12-04", "start": "08:00", "audience": "staff" }
+]
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `title` | yes | Up to 60 characters. |
+| `date` | yes | `YYYY-MM-DD`: the day, or the first day a weekly event may fall on. |
+| `start` | yes | `HH:MM`. |
+| `end` | no | `HH:MM`. An end before the start is the next morning (`21:00` to `01:00`); it can't equal the start. |
+| `note` | no | One line, up to 120 characters, shown with the event. |
+| `price` | no | Entry price in minor units (`700` is 7.00), shown to guests. No booking or tickets. |
+| `audience` | no | `"all"` (the default: guests and staff) or `"staff"` (staff screens only). |
+| `rush` | no | `true` to tell staff to expect a rush. |
+| `repeat` | no | `{"weekdays": ["sat", "sun"], "until": "2027-03-28"}`: weekly on those days, up to the optional end date. |
+
+The next event within 7 days shows on the staff, owner and hub screens and, if it is for guests, under the storefront's
+header; on its day it celebrates and counts down to its start. An event is deleted 2 days after its day (a weekly one, 2
+days after its `until`; without one it stays).
 
 ## theme.json
 
@@ -275,6 +344,7 @@ they live in `.env` (copy `.env.example`; it is never committed) or in the shell
 | `AI_API_KEY` | both (secret on Cloudflare) | unset | Your key for that provider; a local model needs none. Never sent to a browser or logged. |
 | `AI_TIMEOUT_SECONDS` | both | 30 | Seconds to wait for an answer, 1 to 290. A small local model needs more. |
 | `AI_ADAPTER` | both | `chat-completions` | Which adapter speaks to the model. There is one today; leave it unset. |
+| `RENAME_ADMIN_STAFF` | both, once | unset | Only for an install from before the admin level: a staff member saved with the id `admin` stops the start, and this gives them a new id (`till-1`) once, ending their sessions. Unset it afterwards. |
 | `CONFIG_DIR` | Node only | `./config` | The folder with the config files. On Cloudflare the folder is always `config/` at deploy time. |
 | `DATA_DIR` | Node only (and `npm run backup`) | `./data` | Where the SQLite file `ibow.db` is kept. Created if missing. |
 | `HOST` | Node only | `127.0.0.1` | The address to listen on. `127.0.0.1` is this machine only; `0.0.0.0` lets phones on the same Wi-Fi (or a proxy on another machine) reach it. |
@@ -300,6 +370,33 @@ Two more names exist and are not for businesses: `IBOW_DEMO_PINS` and `IBOW_DEMO
 
 Pick PINs that staff can remember and that aren't their birthdays; four digits is short, so give a PIN only to people you
 trust, and change it when someone leaves.
+
+## Import a menu
+
+Most businesses already have a menu, as photos, a page on their site or text. `npm run import-menu` turns it into
+`catalog.json` in a few minutes. A model reads the menu; ibow's own code checks what it read, makes the ids, converts every
+price to minor units and proves the file loads. A person still checks the result: the command lists what needs a look.
+
+```sh
+AI_BASE_URL=https://your-provider/v1 AI_MODEL=a-vision-model AI_API_KEY=... \
+  npm run import-menu -- page-1.jpg page-2.jpg drinks.html --out config/catalog.json --currency EUR --report review.md
+```
+
+- **Inputs:** photos (`.png`, `.jpg`, `.webp`, up to 10 MB each, one page per photo) and text (`.txt`, `.md`, `.html`).
+  A web page: save it as HTML; ibow strips the markup itself. A **PDF is not read**: export its pages as images (or copy
+  its text into a `.txt` file). Pages are read in the order given and merged: a section that continues on the next page
+  stays one category, and an item seen twice is kept once.
+- **Settings:** the same `AI_BASE_URL`, `AI_MODEL` and `AI_API_KEY` as the AI analyst, from `.env` or the shell. For photos the
+  model must read images. Each call waits 120 s unless `AI_TIMEOUT_SECONDS` says otherwise.
+- **Cost:** one model call per photo, and one per about 8,000 characters of text (a long menu is split at blank lines).
+- **Currency:** `--currency`, or the `currency` of a `business.json` beside the output file.
+- **Add-ons** the menu offers (milks, an extra shot) become the `extras` library, offered on their section or item.
+- **What to check** goes to `--report` (or the screen): an item with no price (left out of the file), an odd price (more
+  decimals than the currency has, a range such as `10-12`, or far above the rest), a name the model was unsure of (written
+  with `"available": false` until you switch it on), a duplicate, an unknown tag or
+  diet marker, an add-on offered on nothing, a page it couldn't read, and a category with no station in `stations.json`.
+- It stops, writing nothing, only when no model is set, a model call fails, or nothing usable came back; the message
+  says what it expected, what it found and which file. It never replaces an existing `catalog.json` without `--force`.
 
 ## Worked example: your own café in 15 minutes
 

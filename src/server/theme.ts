@@ -8,11 +8,14 @@
 
 import { createHash } from "node:crypto";
 import type { Context, Hono } from "hono";
+import type { EventInput } from "../core/calendar.ts";
 import { type Catalog, ConfigError } from "../core/config.ts";
+import { diffFeatures, type FlagValue } from "../core/flags.ts";
 import type { LabelOverrides } from "../core/labels.ts";
+import { can } from "../core/levels.ts";
 import { popularTags, typicalWaitMinutes } from "../core/storefront.ts";
 import { applyOverride, checkContrast, type Theme, themeCss } from "../core/theme.ts";
-import type { Store } from "../store/store.ts";
+import type { Session, Store } from "../store/store.ts";
 import { ApiError, type Env } from "./errors.ts";
 
 const DAY_MS = 86_400_000;
@@ -31,10 +34,14 @@ export interface Look {
   media: ReadonlyMap<string, Media>;
   /** Origins of the https images the config names: the only third parties the content security policy admits. */
   imageOrigins: string[];
+  /** `events.json` of the config folder, checked: the calendar's first events, stored once (D-084). */
+  events?: EventInput[];
 }
 
 /** A look as plain JSON (`bundleLook` in `look.ts`): what a Worker runs on, since it has no config folder. */
 export interface LookBundle {
+  /** `events.json` of the config folder, checked (D-084). */
+  events?: EventInput[];
   theme: Theme;
   strings: Look["strings"];
   imageOrigins: string[];
@@ -46,7 +53,13 @@ export function lookFromBundle(b: LookBundle): Look {
   for (const [name, m] of Object.entries(b.media)) {
     media.set(name, { type: m.type, body: Uint8Array.from(atob(m.base64), (c) => c.charCodeAt(0)) });
   }
-  return { theme: b.theme, strings: b.strings, media, imageOrigins: b.imageOrigins };
+  return {
+    theme: b.theme,
+    strings: b.strings,
+    media,
+    imageOrigins: b.imageOrigins,
+    ...(b.events === undefined ? {} : { events: b.events }),
+  };
 }
 
 /** The headers of a config image: an SVG may hold script, so opened directly it runs nothing. */
@@ -75,6 +88,8 @@ export interface ThemeDeps {
   build: string;
   timeZone: string;
   now: () => number;
+  /** The business name, drawn by the splash screen (`--brand-name` in `/theme.css`). */
+  brandName?: string;
 }
 
 function parseStored(base: Theme, json: string | undefined): Theme {
@@ -90,17 +105,30 @@ function parseStored(base: Theme, json: string | undefined): Theme {
 /** What the rest of the server asks of the look in force. */
 export interface ThemeHandle {
   headerColor(): string;
+  /** The features in force: the config's, with the owner's saved changes. */
+  features(): Theme["features"];
+  /** Flips one feature through the Appearance override, audited like any save (D-075). */
+  setFeature(name: string, value: FlagValue, by: Session): void;
 }
 
 export function registerTheme(http: Hono<Env>, deps: ThemeDeps): ThemeHandle {
   const { look, store, build } = deps;
   let effective = parseStored(look.theme, store.themeOverride());
-  let css = themeCss(effective, imageUrl);
-  let version = createHash("sha256").update(css).digest("hex").slice(0, 10);
+  const brand = deps.brandName === undefined ? undefined : { name: deps.brandName };
+  let css = themeCss(effective, imageUrl, brand);
+  // The version is what an open page compares to learn the look changed, so it covers everything `/api/theme` carries that
+  // the stylesheet does not: the switches, the header and the icons, not only the CSS (D-075).
+  const versionOf = () =>
+    createHash("sha256")
+      .update(css)
+      .update(JSON.stringify([effective.features, effective.header, effective.logo, effective.categoryIcons]))
+      .digest("hex")
+      .slice(0, 10);
+  let version = versionOf();
   const refresh = () => {
     effective = parseStored(look.theme, store.themeOverride());
-    css = themeCss(effective, imageUrl);
-    version = createHash("sha256").update(css).digest("hex").slice(0, 10);
+    css = themeCss(effective, imageUrl, brand);
+    version = versionOf();
   };
 
   http.get("/theme.css", (c) => {
@@ -169,11 +197,21 @@ export function registerTheme(http: Hono<Env>, deps: ThemeDeps): ThemeHandle {
 
   // ── The owner's Appearance ─────────────────────────────────────────────────────────────────────────────────────
 
-  function owner(c: Context<Env>): void {
+  function owner(c: Context<Env>): Session {
     const s = c.get("session");
     if (s === undefined) throw new ApiError(401, "no_session", "expected a staff or owner session, found none");
-    if (s.role !== "owner") throw new ApiError(403, "forbidden", `expected the owner, found ${s.role} ${s.user}`);
+    if (!can(s.role, "look.edit")) {
+      throw new ApiError(403, "forbidden", `expected the owner for look.edit, found ${s.role} ${s.user}`);
+    }
+    return s;
   }
+  /** Every change to the features is written to the flag audit: who, when, from what to what. */
+  const audited = (by: Session, change: () => void): void => {
+    const before = effective.features;
+    change();
+    const changes = diffFeatures(before, effective.features);
+    if (changes.length > 0) store.auditFlags(changes, by.user, by.role, deps.now());
+  };
   const state = () => ({
     base: look.theme,
     effective,
@@ -188,7 +226,7 @@ export function registerTheme(http: Hono<Env>, deps: ThemeDeps): ThemeHandle {
   });
 
   http.put("/api/owner/theme", async (c) => {
-    owner(c);
+    const by = owner(c);
     let raw: unknown;
     try {
       raw = await c.req.json();
@@ -201,18 +239,41 @@ export function registerTheme(http: Hono<Env>, deps: ThemeDeps): ThemeHandle {
       if (e instanceof ConfigError) throw new ApiError(400, "bad_theme", e.message);
       throw e;
     }
-    store.setThemeOverride(JSON.stringify(raw));
+    audited(by, () => {
+      store.setThemeOverride(JSON.stringify(raw));
+      refresh();
+    });
     figures = compute();
-    refresh();
     return c.json(state());
   });
 
   http.delete("/api/owner/theme", (c) => {
-    owner(c);
-    store.setThemeOverride(undefined);
+    const by = owner(c);
+    audited(by, () => {
+      store.setThemeOverride(undefined);
+      refresh();
+    });
     figures = compute();
-    refresh();
     return c.json(state());
   });
-  return { headerColor: () => effective.colors.header };
+  return {
+    headerColor: () => effective.colors.header,
+    features: () => effective.features,
+    setFeature(name, value, by) {
+      const stored = store.themeOverride();
+      const base = stored === undefined ? {} : (JSON.parse(stored) as { features?: Record<string, unknown> });
+      const next = { ...base, features: { ...(base.features ?? {}), [name]: value } };
+      try {
+        applyOverride(look.theme, next);
+      } catch (e) {
+        if (e instanceof ConfigError) throw new ApiError(400, "bad_theme", e.message);
+        throw e;
+      }
+      audited(by, () => {
+        store.setThemeOverride(JSON.stringify(next));
+        refresh();
+      });
+      figures = compute();
+    },
+  };
 }

@@ -1,7 +1,9 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
+import { adminEn } from "../src/client/admin-strings.ts";
 import { addOne, cartFromLines, cartTotal, itemCount, qtyOf, setQty } from "../src/client/cart.ts";
 import { priceOf, visibleCategories } from "../src/client/catalog.ts";
+import { eventsEn } from "../src/client/events-strings.ts";
 import { analystEn } from "../src/client/owner-ai-strings.ts";
 import { ownerEn } from "../src/client/owner-strings.ts";
 import { qrPath } from "../src/client/qr.ts";
@@ -96,7 +98,8 @@ describe("client credentials", () => {
   test("the order key goes in a header on fetch; only the EventSource URL carries it", () => {
     for (const { file, src } of clientFiles(/\.ts$/)) {
       const inUrl = [...src.matchAll(/key=\$\{/g)].length;
-      expect(inUrl, file).toBe(file === "live.ts" ? 1 : 0);
+      // A room's key is printed in its QR by design (D-082): it is not an order key.
+      expect(inUrl, file).toBe(file === "live.ts" || file === "owner-spots.ts" ? 1 : 0);
     }
   });
 });
@@ -112,8 +115,8 @@ describe("strings and rendering", () => {
     const baseKey = (key: string) => pluralForm(key)?.base ?? key;
     const keysIn = (src: string) => new Set([...src.matchAll(/\btn?\("([A-Za-z]+)"/g)].map((m) => m[1]));
     const files = clientFiles(/\.ts$/).filter(({ file }) => !/strings\.ts$/.test(file));
-    const staffFiles = new Set(["staff.ts", "print.ts"]);
-    const ownerFiles = new Set(["owner.ts", "owner-view.ts", "owner-appearance.ts"]);
+    const staffFiles = new Set(["staff.ts", "print.ts", "staff-refund.ts", "staff-manager.ts", "staff-rooms.ts"]);
+    const ownerFiles = new Set(["owner.ts", "owner-view.ts", "owner-appearance.ts", "owner-spots.ts"]);
     const owner = keysIn(
       files
         .filter(({ file }) => ownerFiles.has(file))
@@ -128,9 +131,21 @@ describe("strings and rendering", () => {
     for (const key of analyst) expect(Object.keys(analystEn), `missing analyst string ${key}`).toContain(key);
     for (const key of Object.keys(analystEn))
       expect(analyst.has(baseKey(key)), `unused analyst string ${key}`).toBe(true);
+    // The events editor, on the owner's tab and the manager's screen, has its own table (D-084).
+    const editor = new Set(
+      files.flatMap(({ src }) => [...src.matchAll(/\bte\("([A-Za-z]+)"/g)].map((m) => m[1] as string)),
+    );
+    for (const key of editor) expect(Object.keys(eventsEn), `missing events string ${key}`).toContain(key);
+    for (const key of Object.keys(eventsEn)) expect(editor.has(key), `unused events string ${key}`).toBe(true);
+    // The links hub, switches and health page have their own table as well (D-074).
+    const admin = keysIn(files.find(({ file }) => file === "admin.ts")?.src ?? "");
+    for (const key of admin) expect(Object.keys(adminEn), `missing admin string ${key}`).toContain(key);
+    for (const key of Object.keys(adminEn)) expect(admin.has(baseKey(key)), `unused admin string ${key}`).toBe(true);
     const store = keysIn(
       files
-        .filter(({ file }) => !staffFiles.has(file) && !ownerFiles.has(file) && file !== "owner-ai.ts")
+        .filter(
+          ({ file }) => !staffFiles.has(file) && !ownerFiles.has(file) && file !== "owner-ai.ts" && file !== "admin.ts",
+        )
         .map(({ src }) => src)
         .join("\n"),
     );

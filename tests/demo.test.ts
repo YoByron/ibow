@@ -4,15 +4,15 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
-import { aiEnv, clientBuildSkipped, prepareDemo } from "../scripts/demo.ts";
+import { aiEnv, clientBuildSkipped, demoConfigDir, isConfigPath, prepareDemo } from "../scripts/demo.ts";
 import { dailyReport } from "../src/core/insights.ts";
 import { dayKey } from "../src/core/tokens.ts";
-import { type DemoRush, seedDemo } from "../src/demo/seed.ts";
+import { type DemoRush, openSlots, seedDemo } from "../src/demo/seed.ts";
 import { databaseKind, openStore } from "../src/store/node.ts";
 import type { Store } from "../src/store/store.ts";
 import { loadSample, readSample } from "./support/samples.ts";
@@ -167,6 +167,92 @@ describe("seedDemo", { timeout: 120_000 }, () => {
   });
 });
 
+describe("openSlots", () => {
+  const weights = { "7": 1, "9": 4, "19": 6, "21": 2 };
+  test("without opening hours every profile hour is whole", () => {
+    expect(openSlots(weights, undefined).map((s) => [s.hour, s.from, s.to, s.weight])).toEqual([
+      [7, 0, 60, 1],
+      [9, 0, 60, 4],
+      [19, 0, 60, 6],
+      [21, 0, 60, 2],
+    ]);
+  });
+  test("drops the hours the business is shut and keeps only the open part of an hour, with its share of the weight", () => {
+    expect(openSlots(weights, { open: "09:00", close: "19:30" }).map((s) => [s.hour, s.from, s.to, s.weight])).toEqual([
+      [9, 0, 60, 4],
+      [19, 0, 30, 3],
+    ]);
+  });
+  test("an overnight day keeps every hour whole", () => {
+    expect(openSlots(weights, { open: "18:00", close: "02:00" })).toHaveLength(4);
+  });
+  test("says so when the profile and the hours never meet, or a weight is not an hour", () => {
+    expect(() => openSlots({ "6": 1 }, { open: "09:00", close: "17:00" })).toThrow(
+      /overlap the opening hours 09:00-17:00/,
+    );
+    expect(() => openSlots({ "24": 1 }, undefined)).toThrow(/keyed 0 to 23 .* found 24: 1/);
+    expect(() => openSlots({ "9": 0 }, undefined)).toThrow(/positive weights/);
+  });
+});
+
+describe("seedDemo with a sample's own hours and profile", { timeout: 120_000 }, () => {
+  test("places every order inside the business's hours and follows the rush's hourly profile", () => {
+    const base = loadSample("tea-house");
+    const config = { ...base, business: { ...base.business, hours: { open: "09:00", close: "13:30" } } };
+    const rush = { ...(readSample("tea-house", "rush.json") as DemoRush), hourWeights: { "9": 1, "12": 6, "13": 2 } };
+    const store = openStore(":memory:");
+    stores.push(store);
+    seedDemo(store, { config, rush, now: NOW, upi: true });
+    const zone = config.business.timeZone;
+    const minuteOf = (at: number) => {
+      const [h, m] = new Intl.DateTimeFormat("en-GB", {
+        timeZone: zone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      })
+        .format(at)
+        .split(":")
+        .map(Number) as [number, number];
+      return h * 60 + m;
+    };
+    const byHour = new Map<number, number>();
+    for (let k = 1; k <= 7; k++) {
+      for (const o of store.ordersOnDay(dayKey(NOW - k * DAY, zone))) {
+        const m = minuteOf(o.createdAt);
+        expect(m).toBeGreaterThanOrEqual(9 * 60);
+        expect(m).toBeLessThan(13 * 60 + 30);
+        byHour.set(Math.floor(m / 60), (byHour.get(Math.floor(m / 60)) ?? 0) + 1);
+      }
+    }
+    expect([...byHour.keys()].sort((a, b) => a - b)).toEqual([9, 12, 13]);
+    expect(byHour.get(12) as number).toBeGreaterThan(3 * (byHour.get(9) as number));
+  });
+});
+
+describe("demoConfigDir", () => {
+  test("a name is a bundled sample; a path is a config folder, which needs the three files and a rush", () => {
+    expect(isConfigPath("tea-house")).toBe(false);
+    expect(isConfigPath("./cafe")).toBe(true);
+    expect(isConfigPath("C:cafe")).toBe(true);
+    expect(demoConfigDir("tea-house")).toBe(join(root, "samples", "tea-house"));
+    const dir = tempDir();
+    expect(() => demoConfigDir(dir)).toThrow(
+      /expected business.json, catalog.json, stations.json, rush.json in the config folder .* found them missing/,
+    );
+    cpSync(join(root, "samples", "coffee-cart"), dir, { recursive: true });
+    expect(demoConfigDir(dir)).toBe(dir);
+    expect(() => demoConfigDir("nope")).toThrow(/or a path to a config folder/);
+  });
+  test("a config folder by path runs from a tree with no samples folder", () => {
+    const config = tempDir();
+    cpSync(join(root, "samples", "coffee-cart"), config, { recursive: true });
+    const noSamples = join(tempDir(), "samples");
+    expect(demoConfigDir(config, noSamples)).toBe(config);
+    expect(() => demoConfigDir("tea-house", noSamples)).toThrow(/expected one of {2}or a path/);
+  });
+});
+
 describe("prepareDemo", { timeout: 120_000 }, () => {
   test("seeds a new demo database and marks it", async () => {
     const dir = tempDir();
@@ -181,6 +267,7 @@ describe("prepareDemo", { timeout: 120_000 }, () => {
     stores.push(store);
     expect(store.listStaff().map((s) => [s.id, s.role])).toEqual([
       ["counter", "counter"],
+      ["manager", "manager"],
       ["station", "station"],
     ]);
   });
@@ -203,6 +290,15 @@ describe("prepareDemo", { timeout: 120_000 }, () => {
     );
     expect(readFileSync(path).equals(before)).toBe(true);
     expect(existsSync(`${path}-wal`)).toBe(false);
+  });
+
+  test("seeds a demo from a config folder given by path", async () => {
+    const config = tempDir();
+    cpSync(join(root, "samples", "coffee-cart"), config, { recursive: true });
+    const result = await prepareDemo({ sample: config, dataDir: tempDir(), now: NOW });
+    expect(result.configDir).toBe(config);
+    expect(result.name).toBe(loadSample("coffee-cart").business.name);
+    expect(result.orders).toBeGreaterThan(100);
   });
 
   test("refuses an unknown sample", async () => {

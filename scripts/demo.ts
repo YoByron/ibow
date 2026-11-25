@@ -1,6 +1,7 @@
 // Demo mode: a sample business seeded with the past week of orders, on a demo database, with throwaway PINs.
 //   npm run demo                        (the tea house on a temporary database, port 3000)
 //   npm run demo -- coffee-cart --port 3001 --data ./demo-data
+//   npm run demo -- ../my-business/config     (any config folder with a rush.json, by path)
 //   AI_BASE_URL=http://127.0.0.1:11434/v1 AI_MODEL=llama3.2 npm run demo   (with the AI analyst)
 // The demo makes and uses only a database it marked as a demo's; a real install's database is refused, untouched.
 import { type ChildProcess, spawn } from "node:child_process";
@@ -43,11 +44,40 @@ export interface PreparedDemo {
   days: number;
   pins: DemoPins;
   ownerPinHash: string;
+  adminPinHash: string;
   upi: boolean;
 }
 
-function samples(): string[] {
-  return readdirSync(samplesDir).filter((d) => existsSync(join(samplesDir, d, "business.json")));
+/** The bundled samples; none when the tree has no `samples/` folder (a trimmed copy that only runs a config by path). */
+function samples(dir = samplesDir): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((d) => existsSync(join(dir, d, "business.json")));
+}
+
+/** Whether a demo's `sample` argument is a path (it has a slash, backslash, dot or drive colon) rather than a sample's name. */
+export function isConfigPath(sample: string): boolean {
+  return /[\\/.:]/.test(sample);
+}
+
+/**
+ * The config folder a demo runs: a bundled sample by name, or any folder holding a `business.json` (a business being
+ * set up, or one a freelancer is showing to its owner), given as a path. The folder needs a `rush.json` for its history.
+ * `bundled` is the samples folder, for tests.
+ */
+export function demoConfigDir(sample: string, bundled = samplesDir): string {
+  if (isConfigPath(sample)) {
+    const dir = resolve(sample);
+    const missing = ["business.json", "catalog.json", "stations.json", "rush.json"].filter(
+      (f) => !existsSync(join(dir, f)),
+    );
+    if (missing.length === 0) return dir;
+    throw new Error(`demo: expected ${missing.join(", ")} in the config folder ${dir}, found them missing`);
+  }
+  const known = samples(bundled);
+  if (known.includes(sample)) return join(bundled, sample);
+  throw new Error(
+    `demo: expected one of ${known.join(", ")} or a path to a config folder, found ${JSON.stringify(sample)}`,
+  );
 }
 
 /**
@@ -55,10 +85,7 @@ function samples(): string[] {
  * other database is refused before anything is opened for writing.
  */
 export async function prepareDemo(opts: { sample: string; dataDir: string; now: number }): Promise<PreparedDemo> {
-  const known = samples();
-  if (!known.includes(opts.sample)) {
-    throw new Error(`demo: expected one of ${known.join(", ")}, found ${JSON.stringify(opts.sample)}`);
-  }
+  const configDir = demoConfigDir(opts.sample);
   const dbPath = join(resolve(opts.dataDir), "ibow.db");
   const kind = databaseKind(dbPath);
   if (kind === "install") {
@@ -70,19 +97,21 @@ export async function prepareDemo(opts: { sample: string; dataDir: string; now: 
   mkdirSync(opts.dataDir, { recursive: true });
   if (kind === "demo") for (const f of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) rmSync(f, { force: true });
 
-  const configDir = join(samplesDir, opts.sample);
   const read = (f: string): unknown => JSON.parse(readFileSync(join(configDir, f), "utf8"));
   const config = loadConfig({
     business: read("business.json"),
     catalog: read("catalog.json"),
     stations: read("stations.json"),
+    spots: existsSync(join(configDir, "spots.json")) ? read("spots.json") : undefined,
   });
   const upi = config.business.currency === "INR";
   const pins = newDemoPins();
-  const [ownerPinHash, counterHash, stationHash] = await Promise.all([
+  const [ownerPinHash, counterHash, stationHash, managerHash, adminPinHash] = await Promise.all([
     hashPin(pins.owner),
     hashPin(pins.counter),
     hashPin(pins.station),
+    hashPin(pins.manager),
+    hashPin(pins.admin),
   ]);
 
   const store = openStore(dbPath);
@@ -91,6 +120,7 @@ export async function prepareDemo(opts: { sample: string; dataDir: string; now: 
     const seeded = seedDemo(store, { config, rush: read("rush.json") as DemoRush, now: opts.now, upi });
     store.putStaff({ id: "counter", name: "Counter (demo)", pinHash: counterHash, role: "counter" });
     store.putStaff({ id: "station", name: "Stations (demo)", pinHash: stationHash, role: "station" });
+    store.putStaff({ id: "manager", name: "Manager (demo)", pinHash: managerHash, role: "manager" });
     return {
       name: config.business.name,
       configDir,
@@ -99,6 +129,7 @@ export async function prepareDemo(opts: { sample: string; dataDir: string; now: 
       days: seeded.days,
       pins,
       ownerPinHash,
+      adminPinHash,
       upi,
     };
   } finally {
@@ -194,6 +225,7 @@ export async function startDemo(opts: {
         PORT: String(port),
         HOST: host,
         OWNER_PIN_HASH: prepared.ownerPinHash,
+        ADMIN_PIN_HASH: prepared.adminPinHash,
         [DEMO_PINS_ENV]: JSON.stringify(prepared.pins),
         ...(prepared.upi ? { UPI_VPA: DEMO_VPA } : {}),
         ...(opts.now === undefined ? {} : { [DEMO_NOW_ENV]: String(opts.now) }),
@@ -255,9 +287,8 @@ if (import.meta.main) {
   try {
     const args = parseArgs(process.argv.slice(2));
     const demo = await startDemo({ ...args, port: args.port ?? 3000 });
-    const sample = args.sample ?? "tea-house";
     console.log(`
-ibow demo: ${demo.name} (samples/${sample}), ${demo.orders} orders over ${demo.days} days, on a demo database
+ibow demo: ${demo.name} (${demo.configDir}), ${demo.orders} orders over ${demo.days} days, on a demo database
   ${demo.dbPath}
 
   Storefront      ${demo.urls.storefront}

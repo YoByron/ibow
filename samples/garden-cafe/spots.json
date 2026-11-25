@@ -1,0 +1,24 @@
+[
+  {
+    "id": "garden",
+    "name": "Garden",
+    "prefix": "T",
+    "count": 14
+  },
+  {
+    "id": "terrace",
+    "name": "Terrace",
+    "count": 6
+  },
+  {
+    "id": "other",
+    "name": "Elsewhere",
+    "spots": ["Hammock", "Bench by the gate"]
+  },
+  {
+    "id": "rooms",
+    "name": "Room",
+    "kind": "room",
+    "count": 6
+  }
+]

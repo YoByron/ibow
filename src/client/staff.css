@@ -3,7 +3,7 @@ body.staff{padding-bottom:var(--sp-5)}
 body.staff .app-main,body.staff main{padding:var(--sp-4);max-width:680px;margin:0 auto}
 body.owner-page main.owner{max-width:none}
 body.staff header.hdr{border-radius:0 0 var(--r-panel) var(--r-panel)}
-.hdr .hrow>.voice{display:flex;gap:6px;align-items:center}
+.hdr .hacts>.voice{display:flex;gap:6px;align-items:center}
 .hdr .rbtn[aria-pressed=true]{background:var(--accent);color:var(--on-accent)}
 .hdr select{min-height:36px;border-radius:var(--r-pill);border:0;background:rgba(255,255,255,.16);color:inherit;padding:0 8px}
 .hdr select option{color:#000}
@@ -30,7 +30,7 @@ button.chip[aria-pressed=true],a.chip[aria-current=page]{background:var(--accent
 .chips{display:flex;gap:var(--sp-2);flex-wrap:wrap;margin:var(--sp-3) 0}
 .owner-nav{display:flex;gap:6px;margin-top:var(--sp-3);overflow-x:auto;scrollbar-width:none}
 .owner-nav a.chip{background:transparent;border-color:transparent;color:var(--on-hdr);opacity:.85}
-.owner-nav a.chip img.em{font-size:20px}
+.owner-nav a.chip .em{font-size:18px;color:inherit}
 .owner-nav a.chip[aria-current=page]{background:var(--accent);color:var(--on-accent);opacity:1}
 .shell.wide .hdr{padding-bottom:var(--sp-4);position:relative}
 .shell.wide .hdr:after{content:"";position:absolute;left:0;right:0;bottom:0;height:5px;background:repeating-linear-gradient(90deg,var(--awn-a) 0 26px,var(--awn-b) 26px 52px)}
@@ -41,7 +41,22 @@ button.chip[aria-pressed=true],a.chip[aria-current=page]{background:var(--accent
 .login{display:flex;flex-direction:column;gap:var(--sp-3)}
 .login label{display:flex;flex-direction:column;gap:6px;font-weight:600}
 .login input,.login select{min-height:var(--ctl-h);padding:8px 14px;border-radius:var(--r-ctl);border:1.5px solid var(--line);background:var(--card);font-weight:400}
-.gate{padding-top:30vh}
+.tiles{display:flex;flex-direction:column;gap:10px}
+.tile{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:var(--r-card);background:var(--card);box-shadow:inset 0 0 0 1px var(--line);color:var(--ink);text-decoration:none;transition:transform .12s var(--ease)}
+.tile:active{transform:scale(.98)}
+.tile-ic{width:46px;height:46px;border-radius:var(--r-ctl);display:grid;place-items:center;font-size:24px;flex:none;color:var(--primary-text);background:var(--primary-soft);--ic-fill:var(--accent);--ic-fo:.4}
+.tile-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;text-align:left}
+.tile-tx b{font-family:var(--font-display);font-size:18px;font-weight:600}
+.tile-tx small{font-size:13px;color:var(--ink-3)}
+.tile-go{font-size:26px;color:var(--ink-3);line-height:1}
+.tile.main{background:var(--primary);color:var(--on-primary);box-shadow:var(--sh-2)}
+.tile.main .tile-ic{background:rgba(255,255,255,.14);color:inherit}
+.tile.main small,.tile.main .tile-go{color:inherit;opacity:.8}
+.gate{min-height:80vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:12px;padding:24px;max-width:420px;margin:0 auto}
+.gate h1{font-size:26px}
+.gate p{max-width:28ch;line-height:1.5}
+.gate .btn{margin-top:12px}
+.gate-ic{width:76px;height:76px;border-radius:50%;display:grid;place-items:center;font-size:38px;color:var(--primary-text);background:var(--primary-soft);--ic-fill:var(--accent);--ic-fo:.45}
 .chooser{display:flex;flex-direction:column;gap:var(--sp-3)}
 .pin-screen .login{width:100%;max-width:312px;align-items:stretch}
 .pin-screen .login label{color:inherit;font-weight:600}
@@ -114,9 +129,9 @@ ul.lines li>button{min-height:40px;padding:0 14px;border-radius:var(--r-ctl);bac
 .bgroup .gic{font-size:36px;line-height:1;display:flex}
 .bgroup .tot{color:var(--ink-2);font-weight:700;font-size:15px}
 .brows{list-style:none;margin:0;padding:0}
-.brows li{display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-3) var(--sp-4);border-top:1px solid var(--line)}
+.brows li{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-3);padding:var(--sp-3) var(--sp-4);border-top:1px solid var(--line)}
 .brows .sz:empty{display:none}
-.brows .sz{width:26px;font-weight:800;font-size:20px}
+.brows .sz{flex:1 0 100%;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;font-weight:700;font-size:17px;line-height:1.25}
 .brows .count{min-width:64px;height:44px;display:inline-flex;align-items:center;justify-content:center;gap:4px;border-radius:var(--r-panel);background:var(--primary);color:var(--on-primary);font-size:26px;font-weight:800;padding:0 10px;font-variant-numeric:tabular-nums}
 .brows .count.first{background:var(--accent);color:var(--on-accent)}
 .brows .count small{font-size:13px;opacity:.7}
@@ -144,7 +159,7 @@ button.replay{flex:none;width:44px;height:44px;min-height:44px;min-width:44px;pa
 .review{margin-top:auto}
 .split{display:flex;height:10px;border-radius:5px;overflow:hidden;gap:2px;width:100%}
 .split i{display:block;height:100%;min-width:2px}
-.split .cash{background:var(--accent)}.split .upi{background:var(--primary)}
+.split .cash{background:var(--accent)}.split .upi{background:var(--primary)}.split .card{background:var(--ink-3)}
 .chart-box,.insight,.forecast-card,.side-card{background:var(--card);border-radius:var(--r-card);box-shadow:var(--sh-1);padding:var(--sp-4) var(--sp-4)}
 .chart-box{margin:0}
 .chart-box figcaption{display:flex;align-items:center;gap:var(--sp-3);font-weight:800;font-size:17px;margin-bottom:var(--sp-2)}
@@ -162,8 +177,9 @@ svg.chart line.grid{stroke:var(--line);stroke-width:1}
 .insight li{margin:6px 0;line-height:1.45}
 .forecast-card h2,.side-card h2{margin:0 0 var(--sp-2);font-size:17px}
 .side-card .bill{align-items:baseline}
-.side-card ol.plain:not(.top){list-style:decimal;padding-left:1.5rem}
-.side-card ol.plain:not(.top) li{padding:4px 0}
+ol.plain:not(.top){list-style:decimal;padding-left:1.75rem}
+ol.plain:not(.top) li{padding:4px 0}
+ol.plain:not(.top) li::marker{color:var(--ink-3);font-variant-numeric:tabular-nums}
 ol.plain.top{list-style:none;margin:0;padding:0}
 ol.plain.top li{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-top:1px solid var(--line);margin:0}
 ol.plain.top li:first-child{border-top:0}

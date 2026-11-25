@@ -1,0 +1,20 @@
+/* The links hub, the switches and the health page: layout only; colours, type and radii come from the theme's tokens. */
+.admin-page .hub-group{margin:var(--sp-4) 0}
+.admin-page .hub-group>h2{font-size:15px;margin:0 0 var(--sp-2);color:var(--ink-2)}
+.admin-page .hub-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:var(--sp-3)}
+.admin-page .hub-grid .qc{text-align:left}
+.admin-page .choices{display:grid;gap:var(--sp-3);margin:var(--sp-4) 0}
+.admin-page .verdict{display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-4);border-radius:var(--r-card);background:var(--card);font-weight:700}
+.admin-page .verdict.warn{background:var(--warn-soft);color:var(--warn-text)}
+.admin-page .verdict.ok{color:var(--ok-text)}
+.admin-page .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--sp-3);margin:var(--sp-3) 0}
+.admin-page .bars{display:flex;align-items:flex-end;gap:2px;height:72px;margin:var(--sp-3) 0}
+.admin-page .bars i{flex:1;min-height:2px;background:var(--primary);border-radius:2px 2px 0 0}
+.admin-page .bars i.bad{background:var(--warn-text)}
+.admin-page .meter{height:10px;border-radius:5px;background:var(--line);overflow:hidden}
+.admin-page .meter i{display:block;height:100%;background:var(--primary)}
+.admin-page .flag{display:grid;gap:var(--sp-2);padding:var(--sp-3) 0;border-bottom:1px solid var(--line)}
+.admin-page .flag .row{display:flex;gap:var(--sp-3);align-items:center;flex-wrap:wrap}
+.admin-page table.audit{width:100%;border-collapse:collapse;font-size:14px}
+.admin-page table.audit td,.admin-page table.audit th{padding:var(--sp-2);text-align:left;border-bottom:1px solid var(--line)}
+.admin-page .back{display:inline-block;margin:var(--sp-3) 0}

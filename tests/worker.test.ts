@@ -176,11 +176,12 @@ describe("a real install", () => {
     const made = await post(w.base, "/api/orders", {
       clientKey: "retention-order-0001",
       customerName: "Asha",
-      lines: [{ itemId: ITEM, size: "M", qty: 1 }],
+      lines: [{ itemId: ITEM, size: "M", qty: 1, note: "for Meghana" }],
     });
     expect(made.res.status).toBe(201);
     const before = await (await fetch(`${w.base}/api/owner/orders`, { headers: { cookie: owner } })).text();
     expect(before).toContain("Asha");
+    expect(before).toContain("for Meghana");
     const stats = (await (await w.internal("/__stats")).json()) as { alarm: number | null };
     expect(stats.alarm).toBeGreaterThan(Date.now());
     const cleared = (await (await w.internal(`/__retention?now=${Date.now() + 31 * 86_400_000}`)).json()) as {
@@ -189,6 +190,7 @@ describe("a real install", () => {
     expect(cleared.orders).toBe(1);
     const after = await (await fetch(`${w.base}/api/owner/orders`, { headers: { cookie: owner } })).text();
     expect(after).not.toContain("Asha");
+    expect(after).not.toContain("Meghana");
   });
 });
 
@@ -312,6 +314,23 @@ describe("the Demo label", () => {
     for (const path of ["/", "/?kiosk=1"]) {
       const html = await (await fetch(real.base + path)).text();
       expect(html, path).not.toMatch(/Demo|role="note"/);
+    }
+  });
+});
+
+describe("search engines on Workers (D-062)", () => {
+  test("a demo's pages and API ask not to be indexed; a real install's never do", async () => {
+    const d = await demoWorker();
+    for (const path of ["/", "/?kiosk=1", "/owner", "/api/catalog"]) {
+      const res = await fetch(d.base + path);
+      expect(res.headers.get("x-robots-tag"), path).toBe("noindex, nofollow");
+      await res.arrayBuffer();
+    }
+    const real = await realWorker();
+    for (const path of ["/", "/owner", "/api/catalog"]) {
+      const res = await fetch(real.base + path);
+      expect(res.headers.get("x-robots-tag"), path).toBeNull();
+      await res.arrayBuffer();
     }
   });
 });
