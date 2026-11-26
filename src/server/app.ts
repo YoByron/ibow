@@ -19,9 +19,11 @@ import { can, type Level, mayRefund, POWERS, type Power, refundCeiling, TABLE } 
 import {
   addLines,
   advanceStatus,
+  closeIfHandedOver,
   createOrder,
   customerEdit,
   isReady,
+  isServed,
   markReady,
   markServed,
   type Order,
@@ -372,7 +374,8 @@ export function createApp(deps: AppDeps): App {
     const updated = next(current);
     // A rule that changed nothing (marking ready what already is) returns the same order: nothing to store or send.
     if (updated === current) return updated;
-    const event = store.saveOrder(updated, type, now());
+    // A rule may move the status as a consequence (the first ready line, the last line handed over, D-097).
+    const event = store.saveOrder(updated, updated.status === current.status ? type : "order.status", now());
     events.emit("event", event);
     return updated;
   }
@@ -596,7 +599,12 @@ export function createApp(deps: AppDeps): App {
       "order.updated",
       (o) => {
         assertNotOnRoomBill(o, "a counter payment");
-        return { ...o, payment: confirmPayment(o.payment, { by: session.user, method, amountMinor, now: now() }) };
+        // Paid for food already handed over: nothing is left to do, so the order closes (D-097).
+        const at = now();
+        return closeIfHandedOver(
+          { ...o, payment: confirmPayment(o.payment, { by: session.user, method, amountMinor, now: at }) },
+          at,
+        );
       },
     );
     return c.json({ order: staffView(updated) });
@@ -611,7 +619,10 @@ export function createApp(deps: AppDeps): App {
     const updated = change(
       () => load(c.req.param("id")).order,
       "order.updated",
-      (o) => topUp(o, { by: session.user, method, amountMinor, now: now() }),
+      (o) => {
+        const at = now();
+        return closeIfHandedOver(topUp(o, { by: session.user, method, amountMinor, now: at }), at);
+      },
     );
     return c.json({ order: staffView(updated) });
   });
@@ -645,10 +656,20 @@ export function createApp(deps: AppDeps): App {
 
   http.post("/api/orders/:id/advance", (c) => {
     requirePower(c, "orders.run");
+    // `from`: the status the screen showed. The kitchen may have moved the order since (D-097); a tap on a screen a moment
+    // behind then changes nothing instead of skipping a step, and the answer brings the screen up to date.
+    const from = c.req.query("from");
+    if (from !== undefined && !["pending", "preparing", "completed"].includes(from)) {
+      throw new ApiError(
+        400,
+        "bad_input",
+        `expected from to be pending, preparing or completed, found ${JSON.stringify(from)}`,
+      );
+    }
     const updated = change(
       () => load(c.req.param("id")).order,
       "order.status",
-      (o) => advanceStatus(o, now()),
+      (o) => (from !== undefined && from !== o.status ? o : advanceStatus(o, now())),
     );
     return c.json({ order: staffView(updated) });
   });
@@ -692,7 +713,7 @@ export function createApp(deps: AppDeps): App {
     const token = tokenForNumber(c.req.param("token"), day) ?? c.req.param("token");
     const order = store.findByToken(token, day);
     if (order === undefined) throw new ApiError(404, "no_such_token", `expected a token issued today, found ${token}`);
-    return c.json({ token: order.token, status: order.status, ready: isReady(order) });
+    return c.json({ token: order.token, status: order.status, ready: isReady(order), served: isServed(order) });
   });
 
   function station(id: string): string {

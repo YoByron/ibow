@@ -12,7 +12,7 @@ import { importMenuCli } from "../scripts/import-menu.ts";
 import { readMenuPiece } from "../src/ai/menu-reader.ts";
 import { AiError } from "../src/ai/model.ts";
 import { parseCatalog } from "../src/core/config.ts";
-import { buildCatalog, parseReply, priceOf } from "../src/import/catalog.ts";
+import { buildCatalog, parseReply, priceOf, tidyName, tidySection } from "../src/import/catalog.ts";
 import { htmlToText, splitText } from "../src/import/inputs.ts";
 import { chat, type FakeModel, type SeenRequest, startFakeModel } from "./support/fake-model.ts";
 
@@ -581,5 +581,17 @@ describe("a busy model (D-095)", () => {
     };
     await expect(readMenuPiece(badKey, piece, undefined, [1, 2], async () => {})).rejects.toThrow("401");
     expect(calls).toBe(1);
+  });
+});
+
+describe("names as a guest reads them (D-094)", () => {
+  test("an all-capitals name is title-cased, keeping acronyms and small words; the café's own casing stays", () => {
+    expect(tidyName("SHALLOW FRIED IDLY")).toBe("Shallow Fried Idly");
+    expect(tidyName("BBQ CARAMELIZED ONION")).toBe("BBQ Caramelized Onion");
+    expect(tidyName("CREAM OF BROCCOLI & SPINACH")).toBe("Cream of Broccoli & Spinach");
+    expect(tidyName("PB&J TOAST")).toBe("PB&J Toast");
+    expect(tidyName("Caffè Latte")).toBe("Caffè Latte");
+    expect(tidySection("all day breakfast")).toBe("All day breakfast");
+    expect(tidySection("BURGERS, WRAPS & SANDWICHES")).toBe("Burgers, Wraps & Sandwiches");
   });
 });

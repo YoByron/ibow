@@ -79,7 +79,8 @@ test("npm run demo prints the URLs and PINs, and they open a seeded dashboard, c
   const dash = await (await browser.newContext(phone)).newPage();
   await dash.goto(ownerUrl as string);
   await expect(dash.getByRole("note")).toContainText(ownerPin as string);
-  await dash.getByLabel("Owner PIN").fill(ownerPin as string);
+  // A demo fills the PIN in, so a visitor only taps Unlock (D-098).
+  await expect(dash.getByLabel("Owner PIN")).toHaveValue(ownerPin as string);
   await dash.getByRole("button", { name: "Unlock dashboard" }).click();
   // Today depends on the hour the test runs (none before opening); yesterday is always a whole day.
   await expect(dash.getByTestId("stat-ordered")).toContainText(/Yesterday, whole day: \d{3} orders/);
@@ -87,8 +88,8 @@ test("npm run demo prints the URLs and PINs, and they open a seeded dashboard, c
 
   const counter = await (await browser.newContext(phone)).newPage();
   await counter.goto(staffUrl as string);
-  await counter.getByLabel("Staff ID").fill("counter");
-  await counter.getByLabel("PIN").fill(counterPin as string);
+  await expect(counter.getByLabel("Staff ID")).toHaveValue("counter");
+  await expect(counter.getByLabel("PIN")).toHaveValue(counterPin as string);
   await counter.getByRole("button", { name: "Unlock", exact: true }).click();
   await counter.getByRole("link", { name: "Counter" }).click();
   await expect(counter.getByRole("button", { name: /^Pending \d+/ })).toBeVisible();
@@ -99,4 +100,11 @@ test("npm run demo prints the URLs and PINs, and they open a seeded dashboard, c
   await customer.getByTestId("cart-bar").click();
   await customer.getByRole("button", { name: "Place order" }).click();
   await expect(customer.getByTestId("token")).toHaveText(/^#\d+$/);
+
+  // A station's own link fills in the stations' sign-in, and any other role is one tap away (D-098).
+  const kitchen = await (await browser.newContext(phone)).newPage();
+  await kitchen.goto(`${staffUrl as string}#/station/kitchen`);
+  await expect(kitchen.getByLabel("Staff ID")).toHaveValue("station");
+  await kitchen.getByTestId("demo-as-manager").click();
+  await expect(kitchen.getByRole("heading", { level: 1, name: "Kitchen" })).toBeVisible();
 });

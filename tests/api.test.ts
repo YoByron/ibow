@@ -228,7 +228,7 @@ describe("customer API", () => {
     boot();
     await newOrder();
     const r = await call("GET", "/api/tokens/26-001");
-    expect(r).toEqual({ status: 200, body: { token: "26-001", status: "pending", ready: false } });
+    expect(r).toEqual({ status: 200, body: { token: "26-001", status: "pending", ready: false, served: false } });
     expect((await call("GET", "/api/tokens/26-002")).status).toBe(404);
   });
 });

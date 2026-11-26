@@ -112,9 +112,11 @@ export interface RoomBillMove {
 
 /**
  * Takes an order off its room bill (it was put on the wrong room, or the guest pays now after all): it becomes an ordinary
- * unpaid order, paid at the counter like any other. Only an order still open on a room bill can move.
+ * unpaid order, paid at the counter like any other. Only an order still open on a room bill can move. One already handed
+ * over closed itself (D-097); it owes money now, so it is reopened (with the time in its history) and the counter has it
+ * again to take the money.
  */
-export function leaveRoomBill(order: Order): Order {
+export function leaveRoomBill(order: Order, now?: number): Order {
   if (!onOpenRoomBill(order)) {
     throw new OrderError(
       "not_on_room_bill",
@@ -123,7 +125,8 @@ export function leaveRoomBill(order: Order): Order {
     );
   }
   const { roomBill: _gone, ...rest } = order;
-  return rest;
+  if (rest.status !== "completed" || now === undefined) return rest;
+  return { ...rest, status: "preparing", history: [...rest.history, { from: "completed", to: "preparing", at: now }] };
 }
 
 /** The counter's own payment paths refuse an order on an open room bill: it is settled with its room, in Rooms. */

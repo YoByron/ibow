@@ -85,6 +85,31 @@ function text(v: unknown): string {
   return typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "";
 }
 
+const SMALL_WORDS = new Set(["a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the", "to", "with"]);
+
+/**
+ * A name as a menu shows it to a guest, not as the printed menu's typography set it: an all-capitals name ("SHALLOW FRIED
+ * IDLY") in title case, keeping short words without vowels as capitals (BBQ, MRP) and small joining words lower case.
+ * A name with any lower-case letter is the café's own casing and stays as it is.
+ */
+export function tidyName(name: string): string {
+  if (!/\p{Lu}/u.test(name) || /\p{Ll}/u.test(name)) return name;
+  return name
+    .toLowerCase()
+    .split(/(\s+|-|\/|&)/)
+    .map((w, i) => {
+      if (/^[^aeiouy]{2,4}$/i.test(w) && /^\p{L}+$/u.test(w)) return w.toUpperCase();
+      if (i > 0 && SMALL_WORDS.has(w)) return w;
+      return w.replace(/^\p{L}/u, (c) => c.toUpperCase());
+    })
+    .join("");
+}
+
+/** A section's name: all capitals in title case as above, and all lower case ("all day breakfast") with a capital first. */
+export function tidySection(name: string): string {
+  return /\p{Lu}/u.test(name) ? tidyName(name) : name.replace(/^\p{L}/u, (c) => c.toUpperCase());
+}
+
 /** An id from a name: accents dropped, lowercase letters, digits and dashes; empty for a name in another script. */
 export function slug(name: string): string {
   return name
@@ -210,7 +235,7 @@ export function buildCatalog(
     }
     for (const rawSection of Array.isArray(reply.sections) ? reply.sections : []) {
       if (!isObject(rawSection)) continue;
-      let name = text(rawSection.name);
+      let name = tidySection(text(rawSection.name));
       if (name === "") {
         name = "Menu";
         flag({ file, kind: "unreadable name", section: name, detail: "a section had no readable name; called Menu" });
@@ -230,7 +255,7 @@ export function buildCatalog(
 
   function addGroup(raw: unknown, file: string): void {
     if (!isObject(raw)) return;
-    const name = text(raw.name);
+    const name = tidySection(text(raw.name));
     if (name === "") {
       flag({ file, kind: "unreadable name", detail: "an add-on group had no readable name; left out" });
       return;
@@ -257,7 +282,7 @@ export function buildCatalog(
     }
     for (const o of Array.isArray(raw.options) ? raw.options : []) {
       if (!isObject(o)) continue;
-      const oname = text(o.name);
+      const oname = tidyName(text(o.name));
       const label = `${name}: ${oname || "?"}`;
       if (oname === "") {
         flag({ file, kind: "unreadable name", item: label, detail: "an add-on option had no readable name; left out" });
@@ -280,7 +305,7 @@ export function buildCatalog(
   function addItem(raw: unknown, file: string, entry: NonNullable<ReturnType<typeof categories.get>>): void {
     const section = entry.category.name;
     if (!isObject(raw)) return;
-    const name = text(raw.name);
+    const name = tidyName(text(raw.name));
     if (name === "") {
       flag({ file, kind: "unreadable name", section, detail: "an item had no readable name; left out" });
       return;

@@ -281,6 +281,10 @@ export function undoStatus(order: Order, now: number): Order {
 /** The customer replaces their lines: only while pending and within the edit window from creation. */
 export function customerEdit(config: Config, order: Order, lines: readonly LineRequest[], now: number): Order {
   if (order.status !== "pending") throw new OrderError("not_pending", "a pending order", order.status);
+  // An undo can put an order back in pending after the kitchen made something: what is made is not the guest's to change.
+  if (order.lines.some((l) => l.ready || l.served)) {
+    throw new OrderError("not_pending", "an order the kitchen has not started", "a line already ready or served");
+  }
   if (order.payment.state !== "unpaid") {
     throw new OrderError("already_paid", "an unpaid order", `payment ${order.payment.state}`);
   }
@@ -343,7 +347,7 @@ function setReady(
     if (line.ready !== ready && !line.served && order.status !== "completed") marks.add(i);
   }
   if (marks.size === 0) return order;
-  return {
+  const marked: Order = {
     ...order,
     lines: order.lines.map((l, i) => {
       if (!marks.has(i)) return l;
@@ -351,6 +355,30 @@ function setReady(
       return { ...rest, ready, ...(ready && now !== undefined ? { readyAt: now } : {}) };
     }),
   };
+  // The kitchen has started, so a pending order is being prepared: the counter's tabs and the guest's edit window follow
+  // the floor instead of waiting for someone to tap "Start preparing" (D-097).
+  if (ready && now !== undefined && marked.status === "pending") return withStatus(marked, "preparing", now);
+  return marked;
+}
+
+function withStatus(order: Order, to: OrderStatus, now: number): Order {
+  return { ...order, status: to, history: [...order.history, { from: order.status, to, at: now }] };
+}
+
+/** Every line has been handed over to the guest. */
+export function isServed(order: Pick<Order, "lines">): boolean {
+  return order.lines.length > 0 && order.lines.every((l) => l.served);
+}
+
+/**
+ * Every line handed over and nothing owed (paid, or waiting on an open room bill): the order is finished, so it closes
+ * itself instead of waiting on the counter (D-097). An order with money still owed stays open, so the counter still has
+ * it to take the money; confirming that payment then closes it.
+ */
+export function closeIfHandedOver(order: Order, now: number): Order {
+  if (order.status === "completed" || !isServed(order)) return order;
+  if (outstandingMinor(order) > 0 && !onOpenRoomBill(order)) return order;
+  return withStatus(order, "completed", now);
 }
 
 /** Every line is ready or already served: the customer can collect. */
@@ -380,10 +408,11 @@ export function markServed(order: Order, lineIndex: number, now?: number): Order
     throw new OrderError("no_such_line", `a line index below ${order.lines.length}`, String(lineIndex));
   }
   if (line.served) throw new OrderError("already_served", "an unserved line", `line ${lineIndex} served`);
-  return {
+  const served: Order = {
     ...order,
     lines: order.lines.map((l, i) =>
       i === lineIndex ? { ...l, served: true, ...(now === undefined ? {} : { servedAt: now }) } : l,
     ),
   };
+  return now === undefined ? served : closeIfHandedOver(served, now);
 }

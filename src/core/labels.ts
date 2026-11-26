@@ -145,6 +145,9 @@ export const LABELS = {
   stepReadySub: "We will call order {token}",
   stepReadyBrought: "Ready",
   stepReadyBroughtSub: "We are bringing it to {spot}",
+  stepServed: "Served",
+  stepServedSub: "Handed over. Enjoy!",
+  stepServedAtSub: "Brought to {spot}. Enjoy!",
   statItems: "Items",
   statPaid: "Paid",
   statPartPaid: "Part paid",
@@ -156,6 +159,8 @@ export const LABELS = {
   statusPreparing: "Being prepared",
   statusCompleted: "Ready! Please collect it.",
   statusCompletedBrought: "Ready! It is on its way to {spot}.",
+  statusServed: "Handed over. Enjoy!",
+  statusServedAt: "Served at {spot}. Enjoy!",
 
   // The room bill (D-082)
   payRoomTitle: "Add to my room bill",

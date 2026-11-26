@@ -7,7 +7,7 @@
 import type { Health } from "../core/health.ts";
 import { t } from "./admin-strings.ts";
 import { ApiFailure, api } from "./api.ts";
-import { demoNote } from "./demo-note.ts";
+import { demoInfo, demoNote } from "./demo-note.ts";
 import { type Child, h, mount } from "./dom.ts";
 import { eventCardSlot, reloadEvents, showSplashEvent } from "./events.ts";
 import { roundButton, button as uiButton } from "./ui/button.ts";
@@ -201,6 +201,15 @@ function signIn(hub: Hub): void {
       uiButton({ kind: "accent", type: "submit" }, t("signIn")),
       error,
     );
+    // A demo fills in this level's sign-in, so a visitor only taps Sign in (D-098).
+    void demoInfo().then((info) => {
+      if (info === undefined || pad.value() !== "") return;
+      const s =
+        c.level === "staff" ? info.staff.find((x) => x.role === "counter") : info.staff.find((x) => x.role === c.level);
+      const p = c.level === "owner" ? info.owner.pin : c.level === "admin" ? info.admin.pin : s?.pin;
+      if (s !== undefined && c.fixed === undefined && id.value === "") id.value = s.id;
+      if (p !== undefined) pad.fill(p);
+    });
     f.addEventListener("submit", async (e) => {
       e.preventDefault();
       error.textContent = "";

@@ -3,6 +3,7 @@
 import {
   EDIT_WINDOW_MS,
   isReady,
+  isServed,
   type LineExtra,
   type Order,
   type OrderLine,
@@ -46,6 +47,8 @@ export interface CustomerOrderView {
   }[];
   /** Every line is ready or served: the customer can come and collect, even before staff complete the order. */
   ready: boolean;
+  /** Every line handed over: brought to the table or room, or collected (D-097). */
+  served: boolean;
   totalMinor: number;
   outstandingMinor: number;
   payment: { state: "unpaid" } | { state: "claimed" | "confirmed"; method: PaymentMethod; amountMinor: number };
@@ -93,6 +96,7 @@ export function customerView(order: Order): CustomerOrderView {
       ready: l.ready,
     })),
     ready: isReady(order),
+    served: isServed(order),
     totalMinor: orderTotal(order),
     outstandingMinor: outstandingMinor(order),
     payment:

@@ -958,7 +958,7 @@
   about 2,000 tokens: a menu line becomes about three times as many tokens of JSON, and a reply is capped at 8,192 tokens and
   64 KB (D-026). Cost: calls = photos + the sum over text files of ceil(characters / 8,000) at most, in order, one at a time; a
   four-page photographed menu is 4 calls, a 30 KB menu page saved as HTML (about 12 KB of text once stripped) is 2. The
-  command prints the number of calls it made. A busy model (429, 5xx, a timeout or no answer) is asked again after 5, 15 and 30 s, at most three extra calls per piece; any other refusal fails at once. A shared proxy that is out of capacity for a minute then costs a wait, not the pages already read (found on the first real run).
+  command prints the number of calls it made. A busy model (429, 5xx, a timeout or no answer) is asked again after 5, 15 and 30 s, at most three extra calls per piece; any other refusal fails at once. A shared proxy that is out of capacity for a minute then costs a wait, not the pages already read (found on the first real run). Names are tidied in code, not by the model: an all-capitals name, as printed menus set them, is title-cased (short vowel-less words such as BBQ stay capitals, small joining words stay lower case), an all-lower-case section gets a capital first, and a name with mixed case is the café's own and stays (found on the first real run).
 
 
 - **D-087 2026-11-25 A staff record named `admin` is renamed by a setting, on Node and on a Worker alike.** Since D-072 the
@@ -979,3 +979,25 @@
   need. `release-sync.sh` lost its default author: the bare `noreply@users.noreply.github.com` is a real, unrelated
   GitHub account (`noreply`), which the two 2026-11-25 public commits were credited to, so the script now requires
   `RELEASE_AUTHOR_NAME` and `RELEASE_AUTHOR_EMAIL` and refuses that address.
+
+- **D-097 2026-11-26 The order's status follows the floor: the kitchen starting moves it to preparing, the last dish handed
+  over closes it.** Found by recording one order end to end on a café's demo: two orders whose every dish was made and
+  delivered still sat in Pending with "Start preparing", and the guest's phone said "on its way" for good. Now a station's
+  first ready line moves a pending order to preparing (in `markReady`, with the time in the history, so Undo and the
+  owner's timings still work; the guest's edit window closes, since the kitchen has started). When the last line is
+  handed over (`markServed`, from the runner or the counter) and nothing is owed (paid, or on an open room bill), the
+  order closes itself (`closeIfHandedOver`). An order with money still owed stays open, so the counter still has it to
+  take the money; confirming that payment or a top-up then closes it. The guest's view carries `served`, and the phone
+  says "Served at Garden T4. Enjoy!" with a Served step, whatever the payment. A room order that closed itself and is then taken off
+  its room bill owes money again, so it is reopened to preparing (in the history) and the counter has it to collect. An
+  undo back to pending can't reopen the guest's edit once any line is ready or served. The owner's "time to completed"
+  figure now runs to the hand-over (or to the payment, for an order paid after it), which is closer to the guest's wait. The counter's advance now sends the status
+  its screen showed (`?from=`); a screen a moment behind the kitchen then changes nothing instead of skipping a step. Cost:
+  none: the same order row is written by the same calls that already wrote it; the event is `order.status` when the
+  status moved.
+
+- **D-098 2026-11-26 A demo's sign-in screens come filled in.** On a demo install (`GET /api/demo` holds the throwaway
+  PINs, D-035) the staff screen fills in the counter's ID and PIN, or the stations' when the link is a station's; the
+  owner's screen fills in the owner PIN; the links hub fills in the level chosen. Under the note, Counter, Stations and
+  Manager sign in with one tap. A visitor reaches every screen without typing a number, which was the demo's entry
+  barrier. A real install answers `{demo: false}`, so nothing is filled in and no PIN is ever in the page.

@@ -278,7 +278,8 @@ function place(
         order.lines.forEach((_, idx) => {
           order = markServed(order, idx, collected);
         });
-        order = advanceStatus(order, collected);
+        // Handed over and paid (or on a room bill) already closes it (D-097); an unpaid one is closed by the counter.
+        if (order.status !== "completed") order = advanceStatus(order, collected);
         last = collected;
         const reviewAt = collected + 5 * MINUTE;
         if (rand() < 0.05 && reviewAt < now) {

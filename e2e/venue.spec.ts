@@ -86,6 +86,11 @@ test("a table QR sets the spot, extras and a note reach the station and the runn
   await expect(page.getByTestId("status")).toHaveText("Ready! It is on its way to Garden T4.");
   await card.getByRole("button", { name: "Delivered" }).click();
   await expect(runner.getByText("Nothing waiting to be carried.")).toBeVisible();
+  // Handed over at the table: the guest's phone says so (D-097). Not yet paid, so the counter still has the order.
+  await expect(page.getByTestId("status")).toHaveText("Served at Garden T4. Enjoy!");
+  await expect(page.getByText("Brought to Garden T4. Enjoy!")).toBeVisible();
+  const still = (await server.staff("GET", "/api/orders")).body as { orders: { status: string }[] };
+  expect(still.orders[0]?.status).not.toBe("completed");
 });
 
 test("the catalog serves the zones and the extras library", async () => {

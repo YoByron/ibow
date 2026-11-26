@@ -5,6 +5,8 @@ export interface Keypad {
   /** The digits entered so far. */
   value(): string;
   clear(): void;
+  /** Puts digits in as if typed (a demo's PIN filled in for the visitor). */
+  fill(digits: string): void;
 }
 
 /**
@@ -55,5 +57,5 @@ export function keypad(opts: {
       else if (e.key === "Enter") opts.onEnter?.();
     });
   draw();
-  return { el, value: () => get(), clear: () => set("") };
+  return { el, value: () => get(), clear: () => set(""), fill: (digits) => set(digits.replace(/\D/g, "")) };
 }

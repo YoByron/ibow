@@ -202,7 +202,10 @@ function loginView(): void {
       h("h1", {}, catalog.business.name),
       h("p", { class: "sub" }, t("pinSubtitle")),
       form,
-      demoNote("owner"),
+      demoNote("owner", (info) => {
+        if (pad.value() === "") pad.fill(info.owner.pin);
+        return undefined;
+      }),
     ),
   );
 }

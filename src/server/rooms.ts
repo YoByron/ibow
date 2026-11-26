@@ -104,7 +104,7 @@ export function registerRooms(http: Hono<Env>, deps: RoomsDeps): void {
     if (found === undefined)
       throw new ApiError(404, "no_such_order", `expected a known order id, found ${c.req.param("id")}`);
     const room = found.order.roomBill?.room ?? "";
-    const moved = leaveRoomBill(found.order);
+    const moved = leaveRoomBill(found.order, now());
     const { move, event } = store.moveOffRoomBill(moved, {
       orderId: moved.id,
       room,

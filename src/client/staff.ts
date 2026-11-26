@@ -24,7 +24,7 @@ import { ApiFailure, api, serverNow } from "./api.ts";
 import { addOne, type Cart, cartTotal, itemCount, qtyOf, setQty } from "./cart.ts";
 import { cashOptions, changeDue } from "./cash.ts";
 import { extraGroupsOf, extraOptions, findItem, priceOfLine, type StoreCatalog, visibleCategories } from "./catalog.ts";
-import { demoNote } from "./demo-note.ts";
+import { demoNote, demoRoles } from "./demo-note.ts";
 import { type Child, h, mount } from "./dom.ts";
 import { eventCardSlot, reloadEvents, showSplashEvent } from "./events.ts";
 import { eventsBody } from "./events-editor.ts";
@@ -298,7 +298,20 @@ function loginView(): void {
       h("h1", {}, catalog.business.name),
       h("p", { class: "sub" }, t("pinSubtitle")),
       form,
-      demoNote("staff"),
+      // A demo fills in the role its link was for (a station's link signs in a station), and offers the others (D-098).
+      demoNote("staff", (info) => {
+        const want = location.hash.startsWith("#/station") ? "station" : "counter";
+        const s = info.staff.find((x) => x.role === want) ?? info.staff[0];
+        if (s !== undefined && user.value === "" && pad.value() === "") {
+          user.value = s.id;
+          pad.fill(s.pin);
+        }
+        return demoRoles(info, (x) => {
+          user.value = x.id;
+          pad.fill(x.pin);
+          form.requestSubmit();
+        });
+      }),
     ),
   );
 }
@@ -514,8 +527,8 @@ async function counterView(): Promise<void> {
     const canUndo = last !== undefined && serverNow() - last.at <= UNDO_WINDOW_MS;
     const next =
       o.status === "pending"
-        ? action(t("startPreparing"), `adv-${o.id}`, () => post(path(o, "advance")), error, "primary")
-        : action(t("markDone"), `adv-${o.id}`, () => post(path(o, "advance")), error, "primary");
+        ? action(t("startPreparing"), `adv-${o.id}`, () => post(path(o, `advance?from=${o.status}`)), error, "primary")
+        : action(t("markDone"), `adv-${o.id}`, () => post(path(o, `advance?from=${o.status}`)), error, "primary");
     return h(
       "article",
       { class: `order-card${isReady(o) ? " is-ready" : ""}`, "data-testid": `order-${o.token}` },

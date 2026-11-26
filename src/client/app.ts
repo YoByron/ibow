@@ -154,16 +154,24 @@ const price = (itemId: string, size?: string, extras?: readonly string[]) => pri
 const favourites = () => parseList(local.get("ibow.fav"), isId);
 const recents = () => parseList(local.get("ibow.recent"), isRecent);
 
+/** What the guest is told: the order's status, then "served" once every line was handed over (D-097). */
+type Shown = OrderStatus | "served";
+
 /** With a spot (the QR on the table), a ready order is brought there, so the guest is never told to collect it. */
-function statusText(s: OrderStatus, spot?: string): string {
+function statusText(s: Shown, spot?: string): string {
+  if (s === "served") return spot === undefined ? t("statusServed") : t("statusServedAt", { spot });
   if (s === "completed" && spot !== undefined) return t("statusCompletedBrought", { spot });
   return { pending: t("statusPending"), preparing: t("statusPreparing"), completed: t("statusCompleted") }[s];
 }
 
 /** What the customer sees: "ready" as soon as every line is, even before staff mark the order collected. */
-function shown(o: { status: OrderStatus; ready: boolean }): OrderStatus {
+function shown(o: { status: OrderStatus; ready: boolean; served?: boolean }): Shown {
+  if (o.served === true) return "served";
   return o.ready ? "completed" : o.status;
 }
+
+/** Nothing more will happen to the order: ready to collect, or already handed over. */
+const settled = (s: Shown) => s === "completed" || s === "served";
 
 /** Why the storefront can't take an order now (the server's own rule: past the last-order time), or undefined. */
 function orderingBlock(): "closed" | "last" | undefined {
@@ -637,7 +645,7 @@ function menuView(): void {
     api<{ order: CustomerOrderView }>("GET", `/api/orders/${encodeURIComponent(saved.id)}`, { key: saved.key }).then(
       (r) => {
         if (gen !== generation) return;
-        const done = shown(r.order) === "completed";
+        const done = settled(shown(r.order));
         const fresh = quickCard({
           icon: icon("ticket"),
           title: t("tokenCard", { token: r.order.token }),
@@ -1463,7 +1471,7 @@ async function orderView(ref: OrderRef): Promise<void> {
   /** The steps, each from what the order really holds: when it was placed, whether the money is confirmed, its status. */
   function steps(): Child {
     const now = shown(order);
-    const at = ["pending", "preparing", "completed"].indexOf(now);
+    const at = ["pending", "preparing", "completed", "served"].indexOf(now);
     const list: Step[] = [
       {
         title: t("stepPlaced"),
@@ -1481,15 +1489,21 @@ async function orderView(ref: OrderRef): Promise<void> {
         ...(at === 1 ? { time: t("now") } : {}),
         state: at > 1 ? "done" : at === 1 ? "now" : "todo",
       },
-      {
-        title: order.spot === undefined ? t("stepReady") : t("stepReadyBrought"),
-        sub:
-          order.spot === undefined
-            ? t("stepReadySub", { token: order.token })
-            : t("stepReadyBroughtSub", { spot: order.spot }),
-        ...(at === 2 ? { time: t("now") } : {}),
-        state: at === 2 ? "now" : "todo",
-      },
+      at === 3
+        ? {
+            title: t("stepServed"),
+            sub: order.spot === undefined ? t("stepServedSub") : t("stepServedAtSub", { spot: order.spot }),
+            state: "done",
+          }
+        : {
+            title: order.spot === undefined ? t("stepReady") : t("stepReadyBrought"),
+            sub:
+              order.spot === undefined
+                ? t("stepReadySub", { token: order.token })
+                : t("stepReadyBroughtSub", { spot: order.spot }),
+            ...(at === 2 ? { time: t("now") } : {}),
+            state: at === 2 ? "now" : "todo",
+          },
     );
     return timeline(list);
   }
@@ -1548,15 +1562,15 @@ async function orderView(ref: OrderRef): Promise<void> {
 
   function render(): void {
     const now = shown(order);
-    pillEl.className = `live-pill${now === "completed" ? " done" : ""}`;
+    pillEl.className = `live-pill${settled(now) ? " done" : ""}`;
     mount(pillEl, h("i"), statusText(now, order.spot));
-    const showEta = theme.features.cartEta && theme.etaMinutes !== undefined && now !== "completed";
+    const showEta = theme.features.cartEta && theme.etaMinutes !== undefined && !settled(now);
     etaEl.textContent = showEta ? t("etaReady", { n: String(theme.etaMinutes) }) : "";
     const items = order.lines.reduce((n, l) => n + l.qty, 0);
     mount(
       statsEl,
       ahead !== undefined &&
-        now !== "completed" &&
+        !settled(now) &&
         h("div", {}, h("b", { class: "num" }, ahead), h("small", {}, t("statAhead"))),
       h("div", {}, h("b", { class: "num" }, items), h("small", {}, t("statItems"))),
       h("div", {}, h("b", { class: "num" }, money(order.totalMinor)), h("small", {}, paymentLabel())),
@@ -1743,12 +1757,12 @@ function lookupView(): void {
   async function check(token: string): Promise<void> {
     clearTimeout(timer);
     try {
-      const r = await api<{ token: string; status: OrderStatus; ready: boolean }>(
+      const r = await api<{ token: string; status: OrderStatus; ready: boolean; served?: boolean }>(
         "GET",
         `/api/tokens/${encodeURIComponent(token)}`,
       );
       mount(result, tokenView(r.token), h("p", { class: `status status-${shown(r)}` }, statusText(shown(r))));
-      if (r.status !== "completed") timer = setTimeout(() => void check(token), 5000);
+      if (r.status !== "completed" && r.served !== true) timer = setTimeout(() => void check(token), 5000);
     } catch (e) {
       mount(
         result,

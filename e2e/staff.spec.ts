@@ -198,7 +198,8 @@ test("a staged rush: counter, tea and kitchen stations, ten customers, a walk-in
   // A mis-tap is taken back: the counter and the customer's page revert live, then it is marked again.
   await kitchen.getByRole("button", { name: "Undo ready" }).click();
   await expect(kitchen.getByRole("button", { name: "Undo ready" })).toHaveCount(0);
-  await expect(customer.getByTestId("status")).toHaveText("Order placed");
+  // The kitchen had started, so the order stays in preparation (D-097).
+  await expect(customer.getByTestId("status")).toHaveText("Being prepared");
   await expect(counter.getByRole("button", { name: "Ready 7" })).toBeVisible();
   await expect(kitchen.getByTestId("batch-text")).not.toHaveText("Nothing to prepare");
   await kitchen.getByRole("button", { name: "All ready" }).click();
@@ -223,8 +224,8 @@ test("a staged rush: counter, tea and kitchen stations, ten customers, a walk-in
     .getByRole("button", { name: `Add to ${orderNumber(placed[0]?.token as string)}` })
     .last()
     .click();
-  // The added line isn't ready, so the order is back with the kitchen and in Pending.
-  await counter.getByRole("button", { name: /^Pending / }).click();
+  // The added line isn't ready, so the order is back with the kitchen, in Preparing: the kitchen had started it (D-097).
+  await counter.getByRole("button", { name: /^Preparing / }).click();
   const topped = card(placed[0]?.token as string);
   await expect(topped.getByText("Added items: take ₹60 more")).toBeVisible();
   await expect(kitchen.getByTestId("batch-text")).toHaveText(
@@ -329,5 +330,7 @@ test("a jobs station shows one card per customer's job, speaks each arrival and 
   await expect(bench.getByRole("link", { name: "Workshop" })).toBeVisible();
   await expect(bench.getByRole("link", { name: "Counter", exact: true })).toHaveCount(0);
   const counter = await openScreen(await staffContext(browser), s.base, "owner", OWNER_PIN, "#/counter");
+  // The workshop started the job, so it is in preparation (D-097).
+  await counter.getByRole("button", { name: /^Preparing / }).click();
   await expect(counter.getByTestId(`order-${a.token}`)).toContainText("Due AED 475");
 });
