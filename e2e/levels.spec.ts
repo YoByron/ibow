@@ -84,7 +84,8 @@ test("each level signs in at /admin and sees exactly its links and powers", asyn
   await signOut();
 
   await signIn(page, "admin", ADMIN_PIN);
-  expect(await links()).toEqual(["link-health", "link-kiosk", "link-storefront", "link-system-switches"]);
+  // The hub draws after the sign-in answers; read its links once they are there.
+  await expect.poll(links).toEqual(["link-health", "link-kiosk", "link-storefront", "link-system-switches"]);
   await page.getByTestId("link-health").click();
   await expect(page.getByTestId("verdict")).toContainText("Healthy");
   await expect(page.getByTestId("stat-requests")).toBeVisible();
