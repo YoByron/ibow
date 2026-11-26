@@ -4,8 +4,9 @@
 # It builds the same pruned tree as release-export.sh (the committed tree, development files removed) in a temporary
 # directory, runs the same scans on it and on the message, and refuses if either fails. Then it makes the clone's files
 # match that tree (files that no longer exist are deleted; .git, and anything the clone ignores such as node_modules,
-# are left alone) and commits there. The author is RELEASE_AUTHOR_NAME and RELEASE_AUTHOR_EMAIL, a no-reply identity by
-# default. If nothing changed it makes no commit. It never pushes, fetches or touches a remote: publishing is by hand,
+# are left alone) and commits there. The author is RELEASE_AUTHOR_NAME and RELEASE_AUTHOR_EMAIL, both required, with no
+# default: GitHub credits a commit to the account that owns its address, and the bare noreply@users.noreply.github.com
+# belongs to an unrelated account (D-096). If nothing changed it makes no commit. It never pushes, fetches or touches a remote: publishing is by hand,
 # with `git push` from the clone.
 set -euo pipefail
 
@@ -30,8 +31,12 @@ git -C "$dest" rev-parse --git-dir >/dev/null 2>&1 || die "expected $dest to be 
 cd "$here"
 [ -z "$(git status --porcelain)" ] || die "expected a clean working tree here, so the sync is exactly what is committed; commit or stash first"
 
-name="${RELEASE_AUTHOR_NAME:-ibow}"
-email="${RELEASE_AUTHOR_EMAIL:-noreply@users.noreply.github.com}"
+name="${RELEASE_AUTHOR_NAME:-}"
+email="${RELEASE_AUTHOR_EMAIL:-}"
+[ -n "$name" ] && [ -n "$email" ] || die "expected RELEASE_AUTHOR_NAME and RELEASE_AUTHOR_EMAIL (your own <id>+<login>@users.noreply.github.com), found them unset"
+case "$email" in
+  noreply@users.noreply.github.com) die "expected your own no-reply address (<id>+<login>@users.noreply.github.com), found the bare $email, which GitHub credits to an unrelated account" ;;
+esac
 head="$(git rev-parse --short HEAD)"
 
 work="$(mktemp -d)"

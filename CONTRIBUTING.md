@@ -17,17 +17,45 @@ npm run gate
 `npm run gate` runs the type check, the linter and the unit tests. It needs no browser and takes about a minute. If it is
 green on a fresh clone, you are ready.
 
-## The loop
+## Reporting a problem
 
-1. **Open an issue first** for anything bigger than a typo, so we agree on the problem before you spend time on code.
-2. **Write a failing test first**, then the code that makes it pass. Run the narrow test while you work, for example
-   `npx vitest run --dir tests config`.
-3. **`npm run gate` must be green before every commit.** It runs `npm run typecheck`, `npm run lint` (Biome; `npx biome
-   check --write .` fixes formatting) and `npm run test`.
-4. **`npm run check` before you open a pull request.** It is the gate plus the browser tests (`npm run e2e`, Playwright).
-   Run `npx playwright install chromium` once on a new machine to get the browser those tests use. A browser test that
-   only times out when the machine is busy is not a defect: rerun it alone.
-5. **One logical change per commit and per pull request.** A commit that mixes a refactor with a fix is two commits.
+Open an issue with one of the forms: **Bug report** or **Feature request**. Blank issues are turned off so every report
+carries what is needed to act on it. One problem per issue, and search the open and closed issues first.
+
+- A **bug** needs what happened, what you expected, the smallest steps that reproduce it, the commit you ran
+  (`git rev-parse --short HEAD`) and where it runs.
+- A **feature** starts from a real business's problem (who hits it, how often), not from a solution.
+- **Never** put a security problem, a secret, a PIN, an API key or customer data in an issue. Security problems go
+  through the private report described in [SECURITY.md](SECURITY.md).
+
+## From issue to merged fix
+
+Every change follows the same path. A pull request that skips a step is closed with a pointer to this section.
+
+1. **Triage.** A new issue is labelled `needs-triage`. The maintainer reads it, then labels it `accepted` (we want
+   this), `question` (more information is needed), `duplicate` or `wontfix`, with a reason.
+2. **Claim it.** On an `accepted` issue, comment that you will take it. The maintainer assigns it to you. Wait for that,
+   so two people don't build the same thing. An assignment with no pull request after 14 days is released.
+3. **Work on a fork,** on a branch named for the issue, for example `fix/42-counter-total`.
+   - **Write a failing test first**, then the code that makes it pass. Run the narrow test while you work, for example
+     `npx vitest run --dir tests config`.
+   - **`npm run gate` must be green before every commit.** It runs `npm run typecheck`, `npm run lint` (Biome; `npx
+     biome check --write .` fixes formatting) and `npm run test`.
+   - **One logical change per commit and per pull request.** A commit that mixes a refactor with a fix is two commits.
+4. **`npm run check` before you open the pull request.** It is the gate plus the browser tests (`npm run e2e`,
+   Playwright). Run `npx playwright install chromium` once on a new machine to get the browser those tests use. A browser
+   test that only times out when the machine is busy is not a defect: rerun it alone.
+5. **Open the pull request** against `main`, fill in the template, and write `Closes #<issue>` in it. For a change to a
+   screen, attach screenshots before and after. Typo and docs-only fixes may skip steps 1 and 2.
+6. **Review.** CI must pass. The maintainer reviews and may ask for changes; push them to the same branch. Don't
+   force-push once review has started, so the review history stays readable.
+7. **Merge.** Only the maintainer merges, with a squash merge, so `main` keeps one commit per change.
+
+## Who merges
+
+`main` is protected. Nobody pushes to it directly, and a pull request can be merged only when CI is green and the
+maintainer listed in [`.github/CODEOWNERS`](.github/CODEOWNERS) has approved it. Contributors never get merge rights
+through a pull request. Being made a maintainer is the maintainer's decision, after a record of reviewed contributions.
 
 ## Commits
 
@@ -93,7 +121,7 @@ Changes reach the public repository as ordinary commits, never as a fresh reposi
 (`git clone https://github.com/YoByron/ibow`, kept outside your working copy), with this repo committed and clean:
 
 ```sh
-RELEASE_AUTHOR_NAME="Your Name" RELEASE_AUTHOR_EMAIL="you@users.noreply.github.com" \
+RELEASE_AUTHOR_NAME="Your Name" RELEASE_AUTHOR_EMAIL="<id>+<login>@users.noreply.github.com" \
   bash scripts/release-sync.sh /path/to/public-clone "fix: a short message"
 cd /path/to/public-clone && npm ci && npm run gate    # the published tree must pass on its own
 git push                                              # by hand, when you are happy
@@ -102,6 +130,8 @@ git push                                              # by hand, when you are ha
 `release-sync.sh` builds the committed tree without the development-only files, runs the release scans on it and on your
 message (it refuses if either fails), makes the clone's files match (deleting files that no longer exist, leaving `.git` and
 ignored files such as `node_modules` alone) and commits there. A run with nothing new makes no commit. It never pushes, fetches
-or adds a remote. If the author variables are not set it commits as a no-reply identity. Fill in the project links first with
+or adds a remote. Both author variables are required: use your own no-reply address from your GitHub email settings
+(`<id>+<login>@users.noreply.github.com`). The bare `noreply@users.noreply.github.com` is refused, because GitHub
+credits it to an unrelated account. Fill in the project links first with
 `npm run set-links` (the scan refuses leftover placeholders). `scripts/release-export.sh` is only for the very first, one-commit
 release.

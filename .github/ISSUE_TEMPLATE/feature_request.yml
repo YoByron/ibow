@@ -1,0 +1,45 @@
+name: Feature request
+description: Propose a change to what ibow does. Agree on the problem here before any code is written.
+title: "feat: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ibow is small on purpose. A request starts from a real business's problem, not a solution.
+        Please don't open a pull request for this until the maintainer marks the issue `accepted`.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: Who hits it (customer, staff, counter, owner), in what kind of business, and how often.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: The smallest change that would solve it. Say whether it is config or a theme, or needs code.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried or considered
+      description: Workarounds you use today, and other ways you thought of.
+  - type: checkboxes
+    id: fit
+    attributes:
+      label: Fit with the principles (docs/architecture.md)
+      description: Tick what holds. An unticked box is fine; say why in the proposal.
+      options:
+        - label: Nothing about one business is hard-coded; it is config or a theme.
+        - label: It works one-handed on a cheap Android phone, with no new hardware or training.
+        - label: It needs no new personal data, and nothing personal goes to a model.
+        - label: It fits the Cloudflare free plan (it states its cost on a 300-order day if it adds requests, rows or polling).
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to build this myself once it is accepted.

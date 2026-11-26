@@ -57,11 +57,13 @@ function clone(): string {
   return dir;
 }
 
+const AUTHOR = { RELEASE_AUTHOR_NAME: "Pat Example", RELEASE_AUTHOR_EMAIL: "1+pat@users.noreply.github.com" };
+
 const sync = (src: string, dest: string, message: string, env: Record<string, string> = {}) =>
   spawnSync("bash", [join(src, "scripts/release-sync.sh"), dest, message], {
     cwd: src,
     encoding: "utf8",
-    env: { ...process.env, ...env },
+    env: { ...process.env, ...AUTHOR, ...env },
   });
 
 describe.skipIf(!bash)("release-sync.sh", () => {
@@ -107,12 +109,17 @@ describe.skipIf(!bash)("release-sync.sh", () => {
     expect(git(dest, "log", "-1", "--format=%s")).toBe("three");
   });
 
-  test("the default author is a no-reply identity, not the developer", () => {
+  test("refuses without an author, and refuses the bare no-reply address GitHub credits to an unrelated account", () => {
     const src = source({ "README.md": "hello\n" });
     const dest = clone();
-    const res = sync(src, dest, "x", { RELEASE_AUTHOR_NAME: "", RELEASE_AUTHOR_EMAIL: "" });
-    expect(res.status, res.stderr).toBe(0);
-    expect(git(dest, "log", "-1", "--format=%ae")).toMatch(/noreply/);
+    const head = git(dest, "rev-parse", "HEAD");
+    const unset = sync(src, dest, "x", { RELEASE_AUTHOR_NAME: "", RELEASE_AUTHOR_EMAIL: "" });
+    expect(unset.status).not.toBe(0);
+    expect(unset.stderr).toContain("expected RELEASE_AUTHOR_NAME and RELEASE_AUTHOR_EMAIL");
+    const bare = sync(src, dest, "x", { RELEASE_AUTHOR_EMAIL: "noreply@users.noreply.github.com" });
+    expect(bare.status).not.toBe(0);
+    expect(bare.stderr).toContain("unrelated account");
+    expect(git(dest, "rev-parse", "HEAD")).toBe(head);
   });
 
   test("refuses when the scan fails, and leaves the clone exactly as it was", () => {

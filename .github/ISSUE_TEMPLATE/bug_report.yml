@@ -1,0 +1,74 @@
+name: Bug report
+description: Something in ibow does not work as documented.
+title: "bug: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting. One problem per issue, please.
+        **Security problems go to the private report, never here.** Don't paste customer names, phone numbers,
+        PINs, API keys, `.env` or `.dev.vars` contents, or a database.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw. Copy the exact error text if there was one.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: What should have happened, and where that is documented if you know.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of steps from a fresh install or a sample (for example `npm run demo`).
+      placeholder: |
+        1. npm run demo
+        2. Open /counter on a phone
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The commit you ran, from `git rev-parse --short HEAD`.
+    validations:
+      required: true
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Where it runs
+      options:
+        - Plain Node (self-hosted or dev)
+        - Cloudflare Workers
+        - The public demo
+        - Other (say in the notes)
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and browser
+      description: For a screen problem, for example "Android 13, Chrome 131". Leave empty for a server problem.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Server output or a screenshot. Remove anything personal first.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you send
+      options:
+        - label: I searched the open and closed issues and this is not a duplicate.
+          required: true
+        - label: This report holds no secrets and no customer data.
+          required: true

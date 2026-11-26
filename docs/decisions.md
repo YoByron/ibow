@@ -969,3 +969,13 @@
   boot stops naming the setting) and ends that person's sessions; set again later it does nothing. Cost: one staff read at
   start, as before.
 
+- **D-096 2026-11-26 Contributions go issue, accepted, pull request, maintainer merge; `main` is protected; a release
+  names its author.** The public repo had no issue forms, no pull request template and no protection on `main`. Now
+  blank issues are off and two forms (bug, feature) collect what is needed to act; security goes to GitHub's private
+  report. CONTRIBUTING.md states the path: `needs-triage` → `accepted` → claimed and assigned → a fork with a failing
+  test first → a pull request that closes the issue → CI green → the maintainer approves and squash-merges. CODEOWNERS
+  names the maintainer for every path, and a ruleset on `main` requires a pull request, the code owner's approval and a
+  green CI, and blocks force-pushes and deletion; only the repository admin bypasses it, which `release-sync.sh` pushes
+  need. `release-sync.sh` lost its default author: the bare `noreply@users.noreply.github.com` is a real, unrelated
+  GitHub account (`noreply`), which the two 2026-11-25 public commits were credited to, so the script now requires
+  `RELEASE_AUTHOR_NAME` and `RELEASE_AUTHOR_EMAIL` and refuses that address.
