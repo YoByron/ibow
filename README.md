@@ -115,7 +115,7 @@ Five invented businesses in `samples/`, all running on the same code with no cha
 
 How it's built: [docs/architecture.md](docs/architecture.md) (layers, contracts, API, field notes) and
 [docs/decisions.md](docs/decisions.md) (every choice and its reason). One Hono app on SQLite, run as a Cloudflare Worker
-with one Durable Object per install or as a plain Node process; a vanilla TypeScript client of about 25 KB gzipped on
+with one Durable Object per install or as a plain Node process; a vanilla TypeScript client of about 40 KB gzipped on
 first load, three runtime dependencies.
 
 ## Case study

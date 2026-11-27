@@ -30,5 +30,28 @@ The first public version. The rebuilt app has not yet had its pilot rush; the wo
   a readability warning; shared components styled only through tokens; plural-aware wording.
 - **Cloudflare (M9).** Runs on Cloudflare Workers' free plan with one Durable Object per install, or as a plain Node
   process; a public-demo configuration; measured against the free plan's daily limits.
+- **Order-at-counter venues (M10).** Spots (zones and tables) with a QR per spot and a printable QR sheet; extras with
+  min and max picks and a price each; a short note per line, shown, spoken and printed; an item may name its own station;
+  a runner screen showing each order's spot and every line's state, with an alert when part of an order is late;
+  ready-to-delivered minutes on the dashboard; diet and allergen filters; a daily count per item; a last-order time.
+- **Premium look (M11).** Line icons drawn for ibow in place of the 3D emoji-style icons, the Fraunces display face,
+  the business's own dish photos from its config, and a Most loved strip.
+- **Levels, links hub, flags and telemetry (M12).** Card payments that staff record, and refunds netted in every total;
+  owner, manager and system admin levels, each with its own PIN and one table of powers; a links hub at `/admin` showing
+  what the signed-in level may open; feature flags changeable at run time and audited; telemetry kept on the install and
+  never sent anywhere.
+- **App shell (M13).** Installable and full-screen, with a splash screen, transitions between screens, skeletons while
+  loading, proper dialogs for closed, last order passed, sold out, paused and offline, and the customer's name and an
+  order number (#47) wherever a person reads it.
+- **Rooms and events (M14).** A room's own QR can put an order on the room bill, which never counts as received until
+  staff settle it at checkout in one audited payment; a Rooms screen; events with weekly repeats and an entry price,
+  shown as banners to staff and guests.
+- **Menu import (M15).** `npm run import-menu` reads menu photos, text, Markdown or HTML into a checked `catalog.json`,
+  with prices in minor units, duplicates merged, add-ons mapped to extras and a list of everything a person should check.
+  It works with any OpenAI-compatible vision model.
+- **Orders follow the floor.** A station's first ready line moves an order to preparing, and the last dish handed over
+  closes it and tells the guest Served. Demo sign-in screens come filled in, with one-tap roles.
+- **Contributing.** Bug and feature issue forms, a pull request template, code owners and a protected `main`: every
+  change goes issue, accepted, pull request, maintainer merge.
 - **Getting started.** README, install guide, a complete configure guide, a static `/showcase` page, `npm run set-links`
   to fill in the project's links, contributing and security guides, and third-party notices.

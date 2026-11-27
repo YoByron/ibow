@@ -2,6 +2,7 @@
 //   npm run demo                        (the tea house on a temporary database, port 3000)
 //   npm run demo -- coffee-cart --port 3001 --data ./demo-data
 //   npm run demo -- ../my-business/config     (any config folder with a rush.json, by path)
+//   npm run demo -- coffee-cart --now 1795683600000   (the clock stands at that instant: screenshots at a set hour, D-054)
 //   AI_BASE_URL=http://127.0.0.1:11434/v1 AI_MODEL=llama3.2 npm run demo   (with the AI analyst)
 // The demo makes and uses only a database it marked as a demo's; a real install's database is refused, untouched.
 import { type ChildProcess, spawn } from "node:child_process";
@@ -262,8 +263,8 @@ export async function startDemo(opts: {
   };
 }
 
-function parseArgs(argv: string[]): { sample?: string; dataDir?: string; port?: number; host?: string } {
-  const out: { sample?: string; dataDir?: string; port?: number; host?: string } = {};
+function parseArgs(argv: string[]): { sample?: string; dataDir?: string; port?: number; host?: string; now?: number } {
+  const out: { sample?: string; dataDir?: string; port?: number; host?: string; now?: number } = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i] as string;
     const value = () => {
@@ -274,11 +275,15 @@ function parseArgs(argv: string[]): { sample?: string; dataDir?: string; port?: 
     if (a === "--data") out.dataDir = value();
     else if (a === "--port") out.port = Number(value());
     else if (a === "--host") out.host = value();
-    else if (a.startsWith("--")) throw new Error(`demo: expected --data, --port or --host, found ${a}`);
+    else if (a === "--now") out.now = Number(value());
+    else if (a.startsWith("--")) throw new Error(`demo: expected --data, --port, --host or --now, found ${a}`);
     else out.sample = a;
   }
   if (out.port !== undefined && (!Number.isInteger(out.port) || out.port < 0 || out.port > 65535)) {
     throw new Error(`demo: expected --port between 0 and 65535, found ${out.port}`);
+  }
+  if (out.now !== undefined && (!Number.isInteger(out.now) || out.now < 0)) {
+    throw new Error(`demo: expected --now as milliseconds since 1970, found ${out.now}`);
   }
   return out;
 }

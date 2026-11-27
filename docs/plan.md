@@ -64,7 +64,7 @@ every station stream receives exactly its own items with no gaps after a forced 
 ## M6 Release
 - [x] Install guide: Docker image and a plain `node` install on a small VPS (about US$5/month); demo mode with seeded data
 - [ ] README with screenshots, a GIF of a rush, and the pilot shop's real numbers as an anonymous case study (README, screenshots and GIF done; the case study waits on the owner's numbers)
-- [ ] [owner] Approve creating `YoByron/ibow` (public, AGPL-3.0) and the first push
+- [x] [owner] Approve creating `YoByron/ibow` (public, AGPL-3.0) and the first push (done 2026-11-13)
 - [x] Before the first push: publish from a fresh, squashed history, and check it for real-business names and secrets (`scripts/release-export.sh`; rerun it on the final commit)
 - [ ] [device] Pilot at a real shop for one rush
 **Checkpoint:** a stranger following only the README gets a working demo in 10 minutes, and the pilot rush runs clean.
@@ -88,7 +88,7 @@ every station stream receives exactly its own items with no gaps after a forced 
 - [x] Node stays only for local dev, tests and self-hosting; Docker, Dockerfile and compose removed
 - [x] Demo mode on Cloudflare: a public demo install whose sign-in screens show the throwaway demo PINs (demo database only, never a real one)
 - [x] Install guide: deploy with `wrangler`, secrets with `wrangler secret`, a custom domain
-- [ ] [owner] `wrangler login` and the first deploy
+- [x] [owner] `wrangler login` and the first deploy: dropped 2026-11-13, the demo runs on the owner's own server and Workers stays documented as an option
 **Checkpoint:** the 300-order rush replays in Miniflare (workerd, the runtime `wrangler dev` runs) with unique tokens and every station stream complete; the demo deploys from a fresh clone by following the README.
 
 ## M10 Order-at-counter venues (operations; from a real garden cafe's menu, reviews and busy times)
@@ -229,3 +229,4 @@ stripped in code; the failure messages; `npm run gate` green.
 - 2026-11-25 M14 review changes: only a room's own QR can charge it (HMAC key per room from a per-install secret, 403 room_key, keyed Spots print, demo keys at /api/demo), a wrong order can leave a room bill (audited, schema 21), closed days follow the business day past midnight and step by calendar day with a 409 that names them, events may end past midnight, Rooms redraws only for room-bill events, RENAME_ADMIN_STAFF (D-087), configure.md for rooms and events; D-082 to D-084 corrected; 704 unit + 34 browser tests green (5d1f5e6..HEAD).
 - 2026-11-25 Release review changes: a room key of the wrong shape is a 403, not a 500; New QR on Spots rotates one room's key (D-082 corrected); the storefront takes the key out of the address bar; import price strings with more than one number are odd and currency words are dropped, unsure items written switched off (D-092 corrected) (ac6804b..HEAD).
 - 2026-11-26 Found by an end-to-end recording of a café demo: the status follows the floor (a station's first ready line moves a pending order to preparing; the last dish handed over closes it when nothing is owed; the guest sees Served; the counter's advance can't skip a step from a stale screen) (D-097); demo sign-ins come filled in, with one-tap roles (D-098); 746 unit + 34 browser tests green.
+- 2026-11-27 Status check corrections: the public `main` was rewritten once on 2026-11-26, with the owner's approval, so the two 2026-11-25 commits name the owner instead of an unrelated `noreply` account (D-099); the live demo serves the D-097 and D-098 code (checked from its bundles; the server itself was not reachable); README screenshots and GIF regenerated in the M11/M13 look (`npm run screenshots` now waits for the splash and transitions to finish); README first load corrected to about 40 KB gzip; CHANGELOG covers M10 to M15; dev-only undici and sharp patched by overrides, 0 audit findings (D-100); the M6 repo item ticked and the M9 wrangler item dropped at the owner's word; four merged worktrees removed.

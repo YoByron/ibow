@@ -1001,3 +1001,17 @@
   owner's screen fills in the owner PIN; the links hub fills in the level chosen. Under the note, Counter, Stations and
   Manager sign in with one tap. A visitor reaches every screen without typing a number, which was the demo's entry
   barrier. A real install answers `{demo: false}`, so nothing is filled in and no PIN is ever in the page.
+
+- **D-099 2026-11-26 The public history was rewritten once, to correct authorship; D-060 still holds.** The two commits
+  of 2026-11-25 (`f82e30c`, `ca7d741`) were made with release-sync's old default address, which GitHub credits to an
+  unrelated account named `noreply` (D-096). With the owner's approval, and while the repository had no forks or stars,
+  they were re-authored as the owner with identical trees and dates (`06bd8af`, `aab25de`) and force-pushed. The
+  server's updater fetches each commit fresh, so it was unaffected. GitHub still serves the old commits by their ids
+  until it garbage-collects them; nothing references them. Every later release is an ordinary commit again, and the
+  ruleset on `main` blocks force-pushes for everyone but the admin.
+
+- **D-100 2026-11-27 Development-only undici and sharp are pinned to patched versions by npm overrides.** Dependabot
+  reported 18 alerts (16 in undici, 2 in sharp), all through `miniflare` 4.20260730.0, the newest 4.x, which pins
+  undici 7.28.0 and sharp 0.35.2. `overrides` in package.json lifts them to undici 7.30.2 and sharp 0.35.5, close to
+  what wrangler's own miniflare 5 uses; `npm audit` finds nothing, and the Workers tests and the gate pass. None of it
+  ships in the app. Drop the overrides once a miniflare release carries these versions itself.

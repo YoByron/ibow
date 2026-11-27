@@ -56,7 +56,18 @@ async function staffPage(ctx: BrowserContext, base: string, user: string, pin: s
 
 async function shot(page: Page, name: string, fullPage = false): Promise<void> {
   const path = join(media, `${name}.png`);
-  await page.screenshot({ path, fullPage });
+  // The app shell's splash fades out and screens cross-fade (M13): wait until the splash is gone and every finite
+  // animation has ended, or the picture holds two screens at once.
+  await page.waitForFunction(
+    () =>
+      !document.getElementById("splash") &&
+      document
+        .getAnimations()
+        .every(
+          (a) => a.playState !== "running" || a.effect?.getComputedTiming().iterations === Number.POSITIVE_INFINITY,
+        ),
+  );
+  await page.screenshot({ path, fullPage, animations: "disabled" });
   console.log(`${`docs/media/${name}.png`.padEnd(28)}${(statSync(path).size / 1024).toFixed(0).padStart(5)} KB`);
 }
 
@@ -144,7 +155,7 @@ try {
   await customer.getByRole("searchbox").fill("momos");
   await customer.getByRole("button", { name: "Add Veg Momos S/F" }).click();
   await customer.getByTestId("cart-bar").click();
-  await customer.getByLabel("Your name (optional)").fill("Asha");
+  await customer.getByLabel("What's your name?").fill("Asha");
   await shot(customer, "cart");
   await customer.getByRole("button", { name: "Place order" }).click();
   await customer.getByTestId("token").waitFor();
@@ -189,6 +200,8 @@ try {
   await owner.getByLabel("Owner PIN").fill(demo.pins.owner);
   await owner.getByRole("button", { name: "Unlock dashboard" }).click();
   await owner.locator("svg.chart rect.bar.peak").waitFor();
+  // Unlocking can leave the page scrolled, which would cut the business name off the top of the picture.
+  await owner.evaluate(() => window.scrollTo(0, 0));
   await shot(owner, "owner");
   await owner.getByRole("link", { name: "Appearance" }).click();
   await owner.locator(".preview .item").first().waitFor();
