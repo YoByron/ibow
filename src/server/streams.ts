@@ -9,7 +9,7 @@ import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Config } from "../core/config.ts";
 import type { Power } from "../core/levels.ts";
-import type { Order } from "../core/orders.ts";
+import { type Order, reachesStations } from "../core/orders.ts";
 import { type Audience, viewFor } from "../core/views.ts";
 import type { EventFilter, Session, Store, StoredEvent } from "../store/store.ts";
 import { ApiError, type Env } from "./errors.ts";
@@ -41,6 +41,11 @@ function matches(filter: EventFilter, e: StoredEvent): boolean {
   return true;
 }
 
+/** A station never sees an order that waits for the counter's confirmation (D-101); its events are skipped, not held. */
+function shown(audience: Audience, e: StoredEvent): boolean {
+  return audience.kind !== "station" || reachesStations(e.order);
+}
+
 function payload(audience: Audience, e: StoredEvent): string {
   return JSON.stringify({ id: e.id, type: e.type, at: e.at, order: viewFor(audience, e.order) });
 }
@@ -64,10 +69,18 @@ function eventId(raw: string | undefined, field: string): number | undefined {
   return n;
 }
 
-export function registerStreams(http: Hono<Env>, deps: StreamDeps): { open(): number } {
+export interface StreamsHandle {
+  open(): number;
+  /** Whether a staff member has a stream open now, on any phone (D-104: a message to an absent runner goes to everyone). */
+  online(user: string): boolean;
+}
+
+export function registerStreams(http: Hono<Env>, deps: StreamDeps): StreamsHandle {
   const { config, store, events } = deps;
   /** Open streams per customer order or staff session. */
   const openStreams = new Map<string, number>();
+  /** Open staff streams per user, kept in memory by the one process (or Durable Object) that holds the sockets. */
+  const users = new Map<string, number>();
 
   /** Checks access and returns the audience the path names. */
   function audienceOf(c: Context<Env>, kind: string): Audience {
@@ -109,10 +122,17 @@ export function registerStreams(http: Hono<Env>, deps: StreamDeps): { open(): nu
       throw new ApiError(429, "too_many_streams", `expected at most ${cap} open streams here, found ${used}`);
     }
     openStreams.set(slot, used + 1);
+    const user = session?.user;
+    if (user !== undefined) users.set(user, (users.get(user) ?? 0) + 1);
     const release = () => {
       const n = (openStreams.get(slot) ?? 1) - 1;
       if (n <= 0) openStreams.delete(slot);
       else openStreams.set(slot, n);
+      if (user !== undefined) {
+        const u = (users.get(user) ?? 1) - 1;
+        if (u <= 0) users.delete(user);
+        else users.set(user, u);
+      }
     };
 
     return streamSSE(c, async (sse) => {
@@ -132,7 +152,7 @@ export function registerStreams(http: Hono<Env>, deps: StreamDeps): { open(): nu
               page = store.eventsAfter(last, filter, PAGE);
               for (const e of page) {
                 if (sse.aborted) return;
-                await sse.writeSSE({ id: String(e.id), data: payload(audience, e) });
+                if (shown(audience, e)) await sse.writeSSE({ id: String(e.id), data: payload(audience, e) });
                 last = e.id;
               }
             } while (page.length === PAGE);
@@ -177,12 +197,18 @@ export function registerStreams(http: Hono<Env>, deps: StreamDeps): { open(): nu
     const page = store.eventsAfter(after, filterFor(audience), PAGE);
     // Synchronous with the read above, so no matching event can fall between the page and this id.
     const lastEventId = page.length === PAGE ? (page.at(-1) as StoredEvent).id : Math.max(after, store.lastEventId());
-    return c.json({ events: page.map((e) => JSON.parse(payload(audience, e))), lastEventId });
+    return c.json({
+      events: page.filter((e) => shown(audience, e)).map((e) => JSON.parse(payload(audience, e))),
+      lastEventId,
+    });
   }
 
   http.get("/api/stream/:kind", (c) => stream(c, c.req.param("kind")));
   http.get("/api/stream/:kind/:id", (c) => stream(c, c.req.param("kind")));
   http.get("/api/poll/:kind", (c) => poll(c, c.req.param("kind")));
   http.get("/api/poll/:kind/:id", (c) => poll(c, c.req.param("kind")));
-  return { open: () => [...openStreams.values()].reduce((a, b) => a + b, 0) };
+  return {
+    open: () => [...openStreams.values()].reduce((a, b) => a + b, 0),
+    online: (user) => (users.get(user) ?? 0) > 0,
+  };
 }

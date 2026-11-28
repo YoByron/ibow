@@ -1,6 +1,7 @@
 /** Order model, status machine and edit windows. Pure: time is passed in, orders are never mutated. */
 
 import { type Config, type ExtraGroup, extraGroupsFor, isRoom, stationFor } from "./config.ts";
+import type { OrderMessage } from "./messages.ts";
 import { type Payment, type PaymentMethod, topUpPayment, UNPAID } from "./payments.ts";
 
 export type OrderStatus = "pending" | "preparing" | "completed";
@@ -44,6 +45,8 @@ export interface OrderLine {
   /** When the station marked it ready, and when it was handed over: their gap is the wait a ready dish spends cooling. */
   readyAt?: number;
   servedAt?: number;
+  /** Who handed it over (the signed-in user), for the owner's report (D-103); never shown to the guest. */
+  servedBy?: string;
 }
 
 export interface RoomBill {
@@ -66,11 +69,20 @@ export interface Order {
   customerName?: string;
   /** Where the customer sits, as staff read it ("Garden T4"): the label of a spot in `spots.json`, fixed at ordering. */
   spot?: string;
+  /** The id of that spot, fixed at ordering, so the order stays in its section on the runner and the floor (D-103). */
+  spotId?: string;
   /**
    * On the room bill (D-082): the room's spot id, and once staff settled the room at checkout, that settlement's id. The
    * payment stays unpaid until then, so none of it is received.
    */
   roomBill?: RoomBill;
+  /**
+   * Taken while counter-first was on (D-101): it reaches the stations only once its payment is confirmed. Fixed at
+   * ordering, so flipping the switch never changes an order already taken.
+   */
+  paysFirst?: true;
+  /** The guest's messages to their runner and the replies, oldest first (D-104). */
+  messages?: readonly OrderMessage[];
   lines: readonly OrderLine[];
   status: OrderStatus;
   /** Status changes still on the undo stack, oldest first. */
@@ -219,6 +231,8 @@ export function createOrder(
     spotId?: string;
     /** `room`: the guest puts it on their room bill; only from a room's spot. */
     pay?: "room";
+    /** Counter-first was on when it was taken: it waits for the counter's confirmation unless it goes on a room bill. */
+    counterFirst?: boolean;
   },
 ): Order {
   const order: Order = {
@@ -240,14 +254,23 @@ export function createOrder(
       throw new OrderError("bad_spot", `a spot id from spots.json (${known})`, JSON.stringify(input.spotId));
     }
     order.spot = spot.label;
+    order.spotId = spot.id;
   }
   if (input.pay === "room") {
     if (input.spotId === undefined || !isRoom(config, input.spotId)) {
       throw new OrderError("bad_room", "a room's spot id for the room bill", JSON.stringify(input.spotId ?? null));
     }
     order.roomBill = { room: input.spotId };
-  }
+  } else if (input.counterFirst === true) order.paysFirst = true;
   return checkedTotal(order);
+}
+
+/**
+ * Whether the stations may see the order (D-101): always, unless it was taken under counter-first and no person has
+ * confirmed its payment yet. A guest's claim is not a confirmation.
+ */
+export function reachesStations(order: Pick<Order, "paysFirst" | "payment">): boolean {
+  return order.paysFirst !== true || order.payment.state === "confirmed";
 }
 
 /** Whether the order waits on its room's checkout: on a room bill, not yet settled, not paid some other way (D-082). */
@@ -401,8 +424,8 @@ export function topUp(
   return { ...order, payment: topUpPayment(order.payment, input) };
 }
 
-/** Staff hand over one line. */
-export function markServed(order: Order, lineIndex: number, now?: number): Order {
+/** Staff hand over one line; `by` is who did, recorded on the line. */
+export function markServed(order: Order, lineIndex: number, now?: number, by?: string): Order {
   const line = order.lines[lineIndex];
   if (line === undefined) {
     throw new OrderError("no_such_line", `a line index below ${order.lines.length}`, String(lineIndex));
@@ -411,7 +434,14 @@ export function markServed(order: Order, lineIndex: number, now?: number): Order
   const served: Order = {
     ...order,
     lines: order.lines.map((l, i) =>
-      i === lineIndex ? { ...l, served: true, ...(now === undefined ? {} : { servedAt: now }) } : l,
+      i === lineIndex
+        ? {
+            ...l,
+            served: true,
+            ...(now === undefined ? {} : { servedAt: now }),
+            ...(by === undefined ? {} : { servedBy: by }),
+          }
+        : l,
     ),
   };
   return now === undefined ? served : closeIfHandedOver(served, now);

@@ -67,7 +67,7 @@ describe("store", () => {
     const path = join(tempDir(), "ibow.db");
     const a = openStore(path);
     // The theme override is migration 13 on every branch (10 to 12 belong to the cloudflare branch).
-    expect(a.schemaVersion()).toBe(21);
+    expect(a.schemaVersion()).toBe(25);
     const { order } = create(a);
     a.close();
     const b = fresh(path);
@@ -248,5 +248,53 @@ describe("a database from a development build", () => {
     expect(() => openStore(path)).toThrow(
       /made by a development build before 2026-11-11; delete it \(data\/ibow\.db\)/,
     );
+  });
+});
+
+describe("sections and runners (D-102, D-103)", () => {
+  const cafe = loadSample("garden-cafe");
+  function seated(store: Store) {
+    n++;
+    const id = `order-${n}`;
+    return store.createOrder({
+      id,
+      secret: `secret-${n}`,
+      clientKey: `client-key-${n}`,
+      now: t0,
+      timeZone: cafe.business.timeZone,
+      build: (token) =>
+        createOrder(cafe, { id, token, now: t0, spotId: "garden-t4", lines: [{ itemId: "carrot-cake", qty: 1 }] }),
+    }).order;
+  }
+
+  test("an order keeps its spot id, and a handover who made it", () => {
+    const store = fresh();
+    const order = seated(store);
+    expect(store.getOrder(order.id)?.order.spotId).toBe("garden-t4");
+    store.saveOrder(markServed(order, 0, t0 + 60_000, "asha"), "order.updated", t0 + 60_000);
+    expect(store.getOrder(order.id)?.order.lines[0]?.servedBy).toBe("asha");
+  });
+
+  test("the edited layout is one row, absent until the first edit", () => {
+    const store = fresh();
+    expect(store.sectionsLayout()).toBeUndefined();
+    store.setSectionsLayout('[{"id":"patio","name":"Patio","spots":["P1"]}]');
+    store.setSectionsLayout('[{"id":"patio","name":"Patio","spots":["P1","P2"]}]');
+    expect(store.sectionsLayout()).toBe('[{"id":"patio","name":"Patio","spots":["P1","P2"]}]');
+  });
+
+  test("a section's runner holds for one business day; nobody clears it", () => {
+    const store = fresh();
+    store.setSectionRunner("garden", "2026-11-26", "asha");
+    store.setSectionRunner("terrace", "2026-11-26", "asha");
+    store.setSectionRunner("other", "2026-11-25", "ravi");
+    expect(store.sectionRunners("2026-11-26")).toEqual(
+      new Map([
+        ["garden", "asha"],
+        ["terrace", "asha"],
+      ]),
+    );
+    store.setSectionRunner("garden", "2026-11-26", undefined);
+    expect([...store.sectionRunners("2026-11-26").keys()]).toEqual(["terrace"]);
   });
 });

@@ -177,6 +177,13 @@ with at least one station:
 
 `speak` and `print` are required even when you want them off (`false` and `null`); only `view` has a default.
 
+**A kitchen without a screen.** A station screen is optional. Where nobody opens one (the cook works from a printed
+ticket, or from the counter calling out), lines that were never marked ready can still be handed over: the counter's
+"Serve" takes a line straight from waiting to served (the server allows it for anyone who runs orders, runners included),
+and the order closes as usual once it is handed over and paid. The runner screen's "Delivered" does the same on any line
+not yet handed over, ready or not.
+Every station still needs its entry here, since it decides which category's lines go where.
+
 ## spots.json
 
 Where customers sit: tables, benches, corners and, for a business that also lets rooms, its rooms. Optional; without it
@@ -208,6 +215,13 @@ expire, so a guest who has checked out could keep a photo of the QR: press **New
 the old code stops working at once; print the new card and replace the old one. Staff can take an
 order put on the wrong room off its bill on the Rooms screen; it is then paid at the counter like any other. Rooms also
 work for café guests who don't stay: they simply pay the usual way.
+
+**Guest messages.** With the `ops.messages` switch on (the default), a guest can ask for water, the bill, help or something
+more from their order page, or type a short line. The message sounds and is spoken on the phone of the runner given that
+spot's section for the day (on the floor screen). It sounds on every runner's phone and on the counter instead when the
+section has nobody, when the order has no spot, or when the runner's phone has no screen open at that moment (signed out,
+closed, or with the app in the background long enough that its live feed dropped). A message stays on the card with a
+"Message" badge until someone replies, so nothing is lost if a phone missed the sound.
 
 ## events.json
 

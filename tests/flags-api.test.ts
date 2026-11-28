@@ -77,12 +77,12 @@ describe("the definitions", () => {
 });
 
 describe("who may flip what", () => {
-  test("the owner holds the look flags, the admin the system ones, and neither sees the other's", async () => {
+  test("the owner holds the look and operations flags, the admin the system ones, and neither sees the other's", async () => {
     boot();
     const owner = await login("owner", PINS.owner);
     const admin = await login("admin", PINS.admin);
     const o = await call("GET", "/api/flags", undefined, owner);
-    expect(o.body.flags.every((f: { scope: string }) => f.scope === "look")).toBe(true);
+    expect(o.body.flags.every((f: { scope: string }) => f.scope === "look" || f.scope === "ops")).toBe(true);
     const a = await call("GET", "/api/flags", undefined, admin);
     expect(a.body.flags.map((f: { key: string }) => f.key)).toEqual(["ai", "retentionDays", "showcase"]);
     expect((await call("PUT", "/api/flags/retentionDays", { value: 7 }, owner)).status).toBe(403);

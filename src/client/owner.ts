@@ -302,6 +302,14 @@ interface Carry {
   maxMs: number;
 }
 
+/** Today's handovers per person (D-103), with their own ready-to-delivered average where the lines were readied. */
+interface RunnerStat {
+  user: string;
+  name?: string;
+  handovers: number;
+  averageMs?: number;
+}
+
 function stat(
   label: string,
   value: string,
@@ -347,7 +355,12 @@ function changeChip(pct: number | null, say: (pct: string) => string): Child {
 /** The most prep lines shown at once; the list is most needed first, so the rest is the long tail. */
 const FORECAST_SHOWN = 12;
 
-function todayView(report: Report, carry?: Carry, rooms?: { open: number; totalMinor: number }): void {
+function todayView(
+  report: Report,
+  carry?: Carry,
+  rooms?: { open: number; totalMinor: number },
+  runners?: RunnerStat[],
+): void {
   const c = report.comparison;
   const tot = report.totals;
   const f = report.forecast;
@@ -459,6 +472,28 @@ function todayView(report: Report, carry?: Carry, rooms?: { open: number; totalM
               "stat-carry",
               carry.maxMs > 10 * 60_000 ? "warn" : undefined,
               t("carrySub", { n: String(carry.lines), max: String(Math.round(carry.maxMs / 60_000)) }),
+            ),
+          ),
+        runners !== undefined &&
+          runners.length > 0 &&
+          h(
+            "section",
+            { class: "side-card runners", "data-testid": "runners" },
+            h("h2", {}, t("runnersTitle")),
+            h(
+              "ul",
+              { class: "plain" },
+              ...runners.map((r) =>
+                h(
+                  "li",
+                  {},
+                  h("b", {}, r.name ?? r.user),
+                  " ",
+                  t("runnerHandovers", { n: String(r.handovers) }),
+                  r.averageMs !== undefined &&
+                    ` · ${t("runnerAverage", { n: (Math.round(r.averageMs / 6000) / 10).toString() })}`,
+                ),
+              ),
             ),
           ),
         chart(report),
@@ -581,11 +616,13 @@ function todayView(report: Report, carry?: Carry, rooms?: { open: number; totalM
 async function today(): Promise<void> {
   const gen = generation;
   const load = async () => {
-    const r = await api<{ report: Report; carry?: Carry; rooms?: { open: number; totalMinor: number } }>(
-      "GET",
-      "/api/owner/insights",
-    );
-    if (gen === generation) todayView(r.report, r.carry, r.rooms);
+    const r = await api<{
+      report: Report;
+      carry?: Carry;
+      rooms?: { open: number; totalMinor: number };
+      runners?: RunnerStat[];
+    }>("GET", "/api/owner/insights");
+    if (gen === generation) todayView(r.report, r.carry, r.rooms, r.runners);
   };
   await load();
   // Numbers move during the day; five minutes is fresh enough, and only while the tab is in view (every refresh reads

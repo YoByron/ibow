@@ -16,17 +16,28 @@ describe("the powers table", () => {
   test("each level holds exactly what the plan gives it", () => {
     const held = (l: (typeof LEVELS)[number]) => POWERS.filter((p) => can(l, p));
     expect(held("staff")).toEqual(["orders.view", "orders.run", "hub"]);
-    expect(held("manager")).toEqual(["orders.view", "orders.run", "refund", "menu.switch", "events.manage", "hub"]);
+    expect(held("manager")).toEqual([
+      "orders.view",
+      "orders.run",
+      "refund",
+      "menu.switch",
+      "events.manage",
+      "sections.edit",
+      "flags.ops",
+      "hub",
+    ]);
     expect(held("owner")).toEqual([
       "orders.view",
       "orders.run",
       "refund",
       "menu.switch",
       "events.manage",
+      "sections.edit",
       "reports",
       "staff.manage",
       "look.edit",
       "flags.look",
+      "flags.ops",
       "ai.ask",
       "hub",
     ]);

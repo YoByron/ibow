@@ -56,6 +56,7 @@ test("each level signs in at /admin and sees exactly its links and powers", asyn
       "link-counter",
       "link-kiosk",
       "link-runner",
+      "link-floor",
       "link-rooms",
       "link-station-bar",
       "link-station-cakes",

@@ -1015,3 +1015,118 @@
   undici 7.28.0 and sharp 0.35.2. `overrides` in package.json lifts them to undici 7.30.2 and sharp 0.35.5, close to
   what wrangler's own miniflare 5 uses; `npm audit` finds nothing, and the Workers tests and the gate pass. None of it
   ships in the app. Drop the overrides once a miniflare release carries these versions itself.
+
+- **D-101 2026-11-27 Operations switches: a third flag scope, `ops`, held by the manager and the owner.** A café's owner
+  asked for "pay at the counter first, the counter approves, then the kitchen starts", and to switch UPI off on a busy day.
+  These are how the floor runs today, not the look (the owner's) nor the install (the admin's), so they get their own scope
+  and power, `flags.ops` (manager and owner), the hub's one "Switches" link (the page shows each level its own scopes), and the same `flags` table and
+  `flag_audit` rows as D-075. Four switches, each one line: `ops.upi` (default on; like `ai`, off wins: it can take UPI away,
+  never offer it where no `UPI_VPA` is set up), `ops.counterFirst` (default off, so every existing install runs unchanged),
+  `ops.messages` and `ops.sections` (default on; defined now, used by the later parts of M16). Effects: with UPI off the
+  catalog says `upi: false`, `GET /api/orders/:id/upi` answers 409 `upi_off`, and the cart shows no choice, only one banner
+  (from the strings: "Pay at the counter", or with counter-first "Pay at the counter to confirm your order"); the token page
+  says the same until a person confirms the payment (Ordered ≠ Received). Counter-first is stamped on the order when it is
+  taken (`paysFirst`, schema 22), never read live, so flipping the switch leaves orders already taken as they were; a
+  room-bill order is never stamped. `reachesStations(order)` (core) is false while a stamped order's payment is not
+  confirmed (a guest's claim is not a confirmation); the station snapshot filters by it, and the station stream and poll skip
+  those events, so the confirmation's own `order.updated` is the first event a station sees of the order and adds it like a
+  new one (spoken as usual). The counter and the runner read the counter's feed and see it throughout. Cost: a flip is one
+  flag row and one audit row; per request nothing new is read or written (the switch is in memory, the stamp rides on the
+  order's existing row); on a 300-order day, zero added rows.
+
+- **D-102 2026-11-27 Table sections are edited at run time and kept in one store row; rooms stay in `spots.json`.** A café
+  rearranges its floor (a terrace opens for the season, two tables join), and asking the owner to edit a file and restart
+  for that is the wrong tool. The owner and the manager (a new power, `sections.edit`) add, rename and delete table
+  sections and their spots on `/staff#/sections`; the edit is saved whole (`PUT /api/sections`) as one JSON row in a new
+  `sections` table (schema 23) and, once saved, replaces every table zone of `spots.json`, which still seeds the layout
+  until the first edit. Validation is the `spots.json` parser itself (`parseSpots`, with empty sections allowed so a section
+  can be added before its spots), so ids, names and the derived spot ids and labels follow one rule set; a new section
+  gets its id from its name. Rooms are refused (`400 room_section`): each room's QR key is an HMAC of its spot id (D-082),
+  so a room renamed at run time would silently invalidate printed QRs; a table may not take a room's id or a room's spot
+  label either. Renaming a section keeps its id, so its spots' ids and QR cards stay; so does renaming a spot (the
+  editor sends each spot back as `{id, name}`); only a new spot gets an id, `<section>-<slug>`, numbered on past any id
+  already kept. Everything that read `config.zones` for tables now reads
+  the layout in force (`withLayout`): the catalog's `zones`, order creation's spot check, the walk-in spot list, the Spots
+  page and the hub. An order now stores its spot's id beside its label (`spotId`, a column on the order row), so a deleted
+  or renamed spot's open orders keep the label they were taken with. A stored layout that no longer fits `spots.json` (a
+  room zone added later under a table's id) stops the boot with what to change, rather than guessing. Cost: one row
+  written per save, nothing per order; the layout is held in memory by the one writer (the Node process or the Durable
+  Object), so no request reads it from the store; `GET /api/sections` reads only the day's runners and the staff list.
+
+- **D-103 2026-11-27 Runners own sections for the day; the floor shows every spot's state; handovers record who made
+  them.** Five runners with five phones should each see their own tables first. A `section_runners` table holds one row per
+  section (`section`, `day`, `user`); a row from an earlier business day is ignored, so every day starts with nobody
+  assigned and nothing needs clearing. The counter (staff whose role is not `station`), the manager and the owner assign
+  (`PUT /api/sections/:id/runner {user | null}`, power `orders.run`), any number of sections per person, from the floor.
+  With `ops.sections` on, the runner screen shows "My sections" (sections given to the signed-in person plus every
+  section with nobody, and any order whose spot is unknown or deleted) with an "All" switch that adds the others under
+  "Other sections"; nothing is ever orphaned. The split (`mineFirst`) and the floor's colours (`floorState`) are pure in
+  `src/core/floor.ts`, built on `runnerOrders`, so late and ready mean exactly what they mean on the runner: a spot is
+  free, ordered, ready to carry or late, and `message` (an unanswered guest message, the top rank) is already in the type
+  for D-104 to fill. `/staff#/floor` is one screen for the counter, manager and owner: a block per section with its
+  spots, a runner picker, and a tap on a spot opening its open orders; it follows the counter's existing stream. Every
+  handover stores the session's user on the line (`servedBy`, a column on `order_lines`); the owner's insights add
+  `runners: [{user, name, handovers, averageMs?}]` (one aggregate over the day's lines, cached with the rest of the
+  insights) and the Today page lists them. Guests never see a staff name: `customerView` lists its fields explicitly and
+  `servedBy` is not one (tested). Cost on a 300-order day: zero added rows per order or line (two new columns on rows
+  already written); about ten `section_runners` rows written a day (each assignment change is one upsert). The runner and
+  floor screens re-read `GET /api/sections` once a minute so another phone's assignment shows without a reload: six phones
+  over a 12-hour day is about 4,300 requests reading two rows plus the staff list each, some 50,000 rows read of the
+  free plan's 5 million, and nothing written. Those 4,300 are Worker requests too, about 4% of the free plan's 100,000 a
+  day, each a few milliseconds of CPU; with the day's orders, streams and the guests' pages the install stays well inside.
+
+- **D-104 2026-11-27 Guest messages ride on the order's row and the streams that already carry it.** A guest should be able
+  to ask their runner for water or the bill without waving. On the token page (with `ops.messages`, default on) the guest
+  taps a quick chip (water, the bill, help, to add something) or types a line up to 200 characters; the runner answers in
+  one tap ("Coming", "2 minutes") or a short line, and the guest sees it live. A chip is stored as its code, never as text,
+  so each side reads it in its own words and only typed text is personal. Storage: a JSON list in a new `orders.messages`
+  column (schema 24), not a table of its own, because the order's row is already read with every order and every event
+  already snapshots the whole order: the thread costs no extra read anywhere, and a new store method, `saveMessages`,
+  writes only that column plus the order's event (2 rows), where `saveOrder` rewrites the lines, history and payment (about
+  a dozen rows). A table would add a read per order load (or a join) to every snapshot for the same two writes. Routing is
+  computed on the server when the guest sends: `messageTo` (core) gives the runner of the spot's section for the business
+  day (`sectionOf` and the day's section runners, D-103), stored as the message's `to`; absent when the section has nobody,
+  the order no spot, or the runner has no live stream open at that moment (the streams module counts open staff streams
+  per user in memory, in the one process or Durable Object that holds the sockets; nothing is stored), which means every
+  runner and the counter. A runner on the polling fallback counts as absent, so the counter hears it too: a louder
+  mistake rather than a silent one. The message travels as an `order.updated` event on the
+  counter's existing stream to every staff phone and on the order's own stream to the guest; no new stream, no polling.
+  Each screen decides from `to` whether to sound: the runner for messages to them or to everyone, the counter only for
+  messages to everyone; the speech goes through the existing queue (`announce` plus `voice.say`). Runner and counter
+  cards show the last three lines with a "Message" badge while unanswered (the guest's last message has no reply after
+  it), and the floor colours the spot `message`. A fully handed-over or completed order stays on the runner while its
+  guest waits for an answer, and `GET /api/orders` adds completed orders whose guest waits within the 30-minute window
+  (one range over a partial index, `orders_done_messages`, schema 25, holding only completed orders with a thread; orders
+  placed over a day earlier are not looked for), so a reloaded runner still sees them; the counter keeps to open orders. Staff need `orders.view` to reply (a station's staff included); the guest's proof is the
+  order's key. Limits, pure in `src/core/messages.ts` and read from the thread itself, so nothing is held in memory: 20
+  messages from the guest on one order and 40 in the thread (every guest message can be answered), one guest message per
+  10 seconds (`429 too_soon` with `Retry-After`), and a completed order takes messages for 30 minutes after it closed
+  ("the bill, please" after the last dish), then `409 messages_closed` with the time it closed; the token page says each in
+  the guest's words. Guests never see a staff id: `customerView` copies only time, sender, text and chip. Retention clears
+  message text with notes after `retentionDays`: spaces of the same byte length, then removed, on the order and in every
+  snapshot; chips and times stay. Nothing in a thread is sent to a model. Cost on a 300-order day: if one order in three
+  starts a thread of two messages and two replies, 400 messages write 800 rows (0.8% of the free plan's 100,000); the
+  worst case, every order at its 40-message cap, writes 24,000. Each message makes one more event that every open stream
+  pulls (one row read each) and the guest's page re-reads its order once, some ten rows read per message; per request,
+  one order read and one small JSON write, well inside the 10 ms.
+
+- **D-105 2026-11-27 A running timer on every open card, ticked in place by one interval per screen.** Each open card on
+  the counter, the runner and a jobs station shows the time since ordering in its top-right corner (`m:ss`, then `h:mm`
+  from an hour), amber past half of `business.lateMinutes` and red past it; a batch station has no per-order cards, so its
+  "Oldest" figure is the same running timer for the oldest open order. The text and tone are pure (`src/core/elapsed.ts`);
+  the card carries `createdAt` in `data-since`, and one `setInterval` a second per screen rewrites only the text and the
+  `data-tone` of the timers it finds, so nothing re-renders and focus and open sheets are untouched. The clock is the
+  server-corrected `serverNow()`, so a phone whose clock is off still reads true. The colours are tokens (`--warn-soft`,
+  `--warn-text`, `--err`); `role="timer"` keeps a screen reader from reading every second. Cost: nothing on the server.
+
+- **D-106 2026-11-27 One search control on the counter, stations and runner; matches go on top, the queue keeps its order.**
+  With ten orders on the counter, scrolling to find the one a guest names is the slow step. Each of the three screens gets
+  one search control (`src/client/ui/search.ts`): a field that takes letters from the phone's keyboard, and a "123" button
+  that opens the existing digit keypad typing into the same field, so a number is two taps without the keyboard. The
+  matcher is pure (`src/core/search.ts`): a query of digits finds an order by the end of its number ("39" finds 26-039 and
+  26-139, as a guest reads it out); a query with a letter finds a spot's label ("b1") or a guest's name, in any case.
+  `searchFirst` moves the matches to the top, each group keeping the queue's order, and the screen rings them; clearing
+  puts the queue back as it was, oldest first. On the counter the search looks across its three tabs, so a guest's order is
+  found whatever its state. A batch station has no per-order cards: the dishes of the orders found come first and their
+  numbers lead the chips. A search that finds nothing says so. The control is made once per screen and placed in every
+  render, so its text and its open pad survive a live update. Cost: nothing on the server.

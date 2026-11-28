@@ -16,6 +16,7 @@ import { FlagError } from "../core/flags.ts";
 import { businessWeekday, closedDayAt, nextOpenDay, takesOrdersAt } from "../core/hours.ts";
 import { localTime } from "../core/insights.ts";
 import { can, type Level, mayRefund, POWERS, type Power, refundCeiling, TABLE } from "../core/levels.ts";
+import { CLOSED_WINDOW_MS, messagesUntil } from "../core/messages.ts";
 import {
   addLines,
   advanceStatus,
@@ -31,6 +32,7 @@ import {
   type OrderErrorCode,
   orderTotal,
   outstandingMinor,
+  reachesStations,
   topUp,
   undoStatus,
   unmarkReady,
@@ -46,6 +48,7 @@ import {
 import { earlierVisits } from "../core/regulars.ts";
 import { MAX_REVIEW_TEXT, reviewOrder } from "../core/reviews.ts";
 import { assertNotOnRoomBill, openRoomOrders } from "../core/rooms.ts";
+import { withLayout } from "../core/sections.ts";
 import { ordersAhead } from "../core/storefront.ts";
 import { DEFAULT_THEME } from "../core/theme.ts";
 import { dayKey, tokenForNumber } from "../core/tokens.ts";
@@ -55,14 +58,16 @@ import { registerAdmin, systemFlags } from "./admin.ts";
 import { DUMMY_HASH, hashPin, hashSessionId, isPin, needsRehash, newSessionId, sameSecret, verifyPin } from "./auth.ts";
 import { registerCalendar } from "./calendar.ts";
 import { ApiError, type Env } from "./errors.ts";
+import { loadTables, registerFloor } from "./floor.ts";
 import * as input from "./input.ts";
 import { InputError } from "./input.ts";
 import { type Backoff, createLimiter, createLockout, type Limit } from "./limits.ts";
+import { registerMessages } from "./messages.ts";
 import { createReportBuilder } from "./report.ts";
 import { roomKeys } from "./room-keys.ts";
 import { registerRooms } from "./rooms.ts";
 import { type ClientFiles, registerClient } from "./static.ts";
-import { registerStreams } from "./streams.ts";
+import { registerStreams, type StreamsHandle } from "./streams.ts";
 import { createTelemetry } from "./telemetry.ts";
 import { type Look, registerTheme } from "./theme.ts";
 
@@ -218,6 +223,8 @@ export function createApp(deps: AppDeps): App {
    * whose count for today has run out switched off. Rebuilt (two tiny reads) before each place it matters.
    */
   let live = config;
+  /** The table sections the owner edited (D-102), or undefined while spots.json's are in force. */
+  let tables = loadTables(config, store);
   function refreshLive(withCounts = true): void {
     const switches = store.availability();
     // Changing an order that already holds an item must not fail because the item has just run out: the store checks
@@ -227,7 +234,7 @@ export function createApp(deps: AppDeps): App {
         if (left <= 0) switches.set(itemId, false);
       }
     }
-    live = withAvailability(config, switches);
+    live = withLayout(withAvailability(config, switches), tables);
   }
   refreshLive();
   const trustProxy = deps.trustProxy ?? 0;
@@ -253,8 +260,9 @@ export function createApp(deps: AppDeps): App {
     retentionDays: config.business.retentionDays,
     ai: deps.ai !== undefined,
     showcase: deps.demo !== undefined || config.business.showcase === true,
+    upi: upi !== undefined,
   });
-  let streamsHandle: { open(): number } | undefined;
+  let streamsHandle: StreamsHandle | undefined;
   const telemetry = createTelemetry({
     store,
     now,
@@ -418,16 +426,33 @@ export function createApp(deps: AppDeps): App {
         ...(cashShortcutsMinor ? { cashShortcutsMinor } : {}),
         ...(hours ? { hours } : {}),
       },
-      payments: { upi: upi !== undefined, card: config.business.card === true },
-      ...(config.zones.length === 0 ? {} : { zones: config.zones }),
+      payments: {
+        upi: system.opsOn("ops.upi"),
+        card: config.business.card === true,
+        ...(system.opsOn("ops.counterFirst") ? { counterFirst: true } : {}),
+      },
+      ...(system.opsOn("ops.messages") ? { messages: true } : {}),
+      ...(live.zones.length === 0 ? {} : { zones: live.zones }),
       ...(Object.keys(left).length === 0 ? {} : { left }),
       ...live.catalog,
     });
   });
 
+  /** UPI switched off by the manager where it is set up (D-101): neither its link nor a guest's claim of it. */
+  function refuseUpiOff(): void {
+    if (upi !== undefined && !system.opsOn("ops.upi")) {
+      throw new ApiError(
+        409,
+        "upi_off",
+        "expected UPI switched on (ops.upi), found it switched off by the manager; pay at the counter",
+      );
+    }
+  }
+
   http.get("/api/orders/:id/upi", (c) => {
     const order = ownOrder(c, c.req.param("id"));
     if (upi === undefined) throw new ApiError(404, "no_upi", "expected a business that takes UPI, found none set up");
+    refuseUpiOff();
     const intent = upiIntent({ ...upi, amountMinor: orderTotal(order), currency: order.currency, token: order.token });
     return c.json({ intent });
   });
@@ -499,6 +524,7 @@ export function createApp(deps: AppDeps): App {
     const at = now();
     refreshLive();
     const id = randomUUID();
+    const counterFirst = system.opsOn("ops.counterFirst");
     const result = store.createOrder({
       id,
       secret: randomBytes(24).toString("base64url"),
@@ -514,6 +540,7 @@ export function createApp(deps: AppDeps): App {
           ...(name ? { customerName: name } : {}),
           ...(spotId === undefined ? {} : { spotId }),
           ...(pay === undefined ? {} : { pay }),
+          ...(counterFirst ? { counterFirst } : {}),
         }),
     });
     if (result.event) events.emit("event", result.event);
@@ -523,7 +550,11 @@ export function createApp(deps: AppDeps): App {
 
   http.get("/api/orders", (c) => {
     requirePower(c, "orders.view");
-    return c.json({ orders: store.openOrders().map(staffView), lastEventId: store.lastEventId() });
+    // Open orders, then completed ones whose guest still waits for an answer within the window (D-104), so a screen
+    // reloaded meanwhile still shows the message. Orders placed over a day before are not looked for.
+    const at = now();
+    const waiting = store.waitingCompleted(at - DAY_MS - CLOSED_WINDOW_MS).filter((o) => (messagesUntil(o) ?? 0) >= at);
+    return c.json({ orders: [...store.openOrders(), ...waiting].map(staffView), lastEventId: store.lastEventId() });
   });
 
   http.get("/api/orders/:id", (c) => {
@@ -552,6 +583,7 @@ export function createApp(deps: AppDeps): App {
   http.post("/api/orders/:id/claim", async (c) => {
     const b = await body(c);
     const method = b.method === undefined ? "upi" : input.method(b.method, "method");
+    if (method === "upi") refuseUpiOff();
     const updated = change(
       () => ownOrder(c, c.req.param("id")),
       "order.updated",
@@ -697,12 +729,13 @@ export function createApp(deps: AppDeps): App {
   });
 
   http.post("/api/orders/:id/lines/:index/served", (c) => {
-    requirePower(c, "orders.run");
+    const session = requirePower(c, "orders.run");
     const index = Number(c.req.param("index"));
+    // Who handed it over is kept on the line, for the owner's report per runner (D-103).
     const updated = change(
       () => load(c.req.param("id")).order,
       "order.updated",
-      (o) => markServed(o, index, now()),
+      (o) => markServed(o, index, now(), session.user),
     );
     return c.json({ order: staffView(updated) });
   });
@@ -746,7 +779,18 @@ export function createApp(deps: AppDeps): App {
       const refs = input.lineRefs((await body(c)).lines);
       const byOrder = new Map<string, number[]>();
       for (const r of refs) byOrder.set(r.orderId, [...(byOrder.get(r.orderId) ?? []), r.index]);
-      for (const [orderId, indexes] of byOrder) rule(load(orderId).order, stationId, indexes, at);
+      for (const [orderId, indexes] of byOrder) {
+        const o = load(orderId).order;
+        // Not on any station yet (D-101): nothing of it can be marked ready or undone.
+        if (!reachesStations(o)) {
+          throw new ApiError(
+            409,
+            "awaiting_payment",
+            `expected an order on the stations, found ${o.token} waiting for its payment to be confirmed at the counter`,
+          );
+        }
+        rule(o, stationId, indexes, at);
+      }
       const orders = [...byOrder].map(([orderId, indexes]) =>
         stationView(
           change(
@@ -769,6 +813,7 @@ export function createApp(deps: AppDeps): App {
     const stationId = station(c.req.param("id"));
     const orders = store
       .openOrders()
+      .filter(reachesStations)
       .map((o) => stationView(o, stationId))
       .filter((v) => v.lines.length > 0);
     return c.json({ orders, lastEventId: store.lastEventId() });
@@ -968,6 +1013,7 @@ export function createApp(deps: AppDeps): App {
     const key = `${store.lastEventId()}:${localTime(at, timeZone).day}`;
     if (insightsCache?.key !== key) {
       const carry = store.carryStats(localTime(at, timeZone).day);
+      const runners = store.runnerStats(localTime(at, timeZone).day);
       insightsCache = {
         key,
         body: {
@@ -985,6 +1031,20 @@ export function createApp(deps: AppDeps): App {
             ? {}
             : {
                 carry: { lines: carry.lines, averageMs: Math.round(carry.totalMs / carry.lines), maxMs: carry.maxMs },
+              }),
+          // Handovers per person today, and how long their lines stood ready before they carried them (D-103).
+          ...(runners.length === 0
+            ? {}
+            : {
+                runners: runners.map((r) => {
+                  const name = store.getStaff(r.user)?.name;
+                  return {
+                    user: r.user,
+                    ...(name === undefined ? {} : { name }),
+                    handovers: r.handovers,
+                    ...(r.timed === 0 ? {} : { averageMs: Math.round(r.totalMs / r.timed) }),
+                  };
+                }),
               }),
         },
       };
@@ -1080,14 +1140,39 @@ export function createApp(deps: AppDeps): App {
     ...(look.events === undefined ? {} : { seed: look.events }),
   });
   registerRooms(http, { config, store, now, requirePower, events, checkMethod });
+  registerFloor(http, {
+    config,
+    store,
+    now,
+    requirePower,
+    sectionsOn: () => system.opsOn("ops.sections"),
+    tables: () => tables,
+    setTables: (edited) => {
+      tables = edited;
+      refreshLive();
+    },
+  });
+  registerMessages(http, {
+    store,
+    events,
+    now,
+    timeZone: config.business.timeZone,
+    ownOrder,
+    requirePower,
+    on: () => system.opsOn("ops.messages"),
+    zones: () => withLayout(config, tables).zones,
+    online: (user) => streamsHandle?.online(user) ?? false,
+  });
   registerAdmin(http, {
     config,
+    zones: () => withLayout(config, tables).zones,
     accessOf,
     store,
     now,
     requirePower,
     system,
     aiConfigured: deps.ai !== undefined,
+    upiConfigured: upi !== undefined,
     theme: themeHandle,
     telemetry,
   });

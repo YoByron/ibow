@@ -89,6 +89,8 @@ ul.lines li:first-child{border-top:0}
 ul.lines li.served .line-name{text-decoration:line-through;color:var(--ink-3)}
 .line-name{flex:1 1 40%;font-weight:600;min-width:0}
 .line-name.big{font-size:18px;font-weight:800}
+ul.run-lines li{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:var(--sp-3)}
+.line-text{display:flex;flex-direction:column;gap:2px;min-width:0}
 ul.lines li>button{min-height:40px;padding:0 14px;border-radius:var(--r-ctl);background:var(--card-2);font-weight:700}
 .plain li{margin:4px 0}
 .paid{color:var(--ok-text);font-weight:700}
@@ -279,3 +281,33 @@ ol.plain.top .qv small{font-size:11px;color:var(--ink-3);font-weight:600}
     text-align: right;
   }
 }
+/* The running timer, top right of every open card (D-105): amber past half the late time, red past it. */
+.card-head .timer{margin-left:auto}
+.timer{font-variant-numeric:tabular-nums;font-weight:700;padding:4px 8px;border-radius:var(--r-ctl);background:var(--card-2);color:var(--ink-2)}
+.timer[data-tone=warn]{background:var(--warn-soft);color:var(--warn-text)}
+.timer[data-tone=late]{background:var(--card-2);color:var(--err);box-shadow:inset 0 0 0 2px var(--err)}
+/* One search control per screen (D-106): letters from the phone's keyboard, digits from the pad; matches ringed, on top. */
+.order-search{display:flex;flex-direction:column;gap:var(--sp-2)}
+.order-search-row{display:flex;gap:var(--sp-2)}
+.order-search-input{flex:1;min-width:0;min-height:48px;padding:0 14px;border-radius:var(--r-ctl);border:1.5px solid var(--line);background:var(--card);color:var(--ink);font:inherit}
+.order-search-pad,.order-search-clear{min-width:48px;min-height:48px;padding:0 10px;border-radius:var(--r-ctl);background:var(--card-2);color:var(--ink);font-weight:700}
+.order-search-keys[hidden]{display:none}
+.order-search-keys .pdots{display:none}
+.order-search-keys .keypad-wrap{display:flex;justify-content:center}
+.order-search-keys .keypad{margin:0}
+.order-card.match{box-shadow:inset 0 0 0 3px var(--accent)}
+.chips i.match{box-shadow:inset 0 0 0 2px var(--accent)}
+
+/* a guest's messages on a runner or counter card (D-104) */
+.msg-badge{display:inline-flex;align-items:center;gap:4px}
+.msg-badge svg{width:14px;height:14px}
+.thread{margin:var(--sp-2) 0;padding:var(--sp-2) var(--sp-3);border-radius:var(--r-ctl);background:var(--card-2)}
+.thread.waiting{box-shadow:inset 3px 0 0 var(--warn)}
+.thread-lines{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:14.5px}
+.thread-lines .from-staff{color:var(--ink-2)}
+.thread-reply{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-2);margin-top:var(--sp-2)}
+.thread-reply>button{min-height:44px;padding:0 var(--sp-3);border-radius:var(--r-ctl);background:var(--card);color:var(--ink);font-weight:700;margin:0}
+.thread-reply>button.primary{background:var(--primary);color:var(--on-primary);box-shadow:none}
+.thread-line{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--sp-2)}
+.thread-line input{min-height:44px;padding:0 var(--sp-3);border-radius:var(--r-ctl);border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.thread-line>button{min-height:44px;padding:0 var(--sp-3);border-radius:var(--r-ctl);background:var(--card);font-weight:700}

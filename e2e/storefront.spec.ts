@@ -117,7 +117,7 @@ test("a customer orders a size with a name, edits in the window, pays by UPI and
   await expect(fourStars).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("status")).toHaveCount(1);
   await page.getByLabel("Anything to add? (optional)").fill("Quick and hot");
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.getByText("Thanks for your review!")).toBeVisible();
 
   await page.getByRole("link", { name: "Find my order" }).click();
@@ -198,4 +198,21 @@ test("a kiosk left mid-order resets after the idle time, and back doesn't bring 
   await expect(page.getByRole("searchbox")).toBeVisible();
   await expect(cartBar).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Place order" })).toHaveCount(0);
+});
+
+test("under counter-first with UPI on, a guest who says they paid is told the kitchen starts once the counter confirms", async ({
+  browser,
+}) => {
+  server = await startServer("tea-house", { UPI_VPA: "teahouse@example", UPI_PAYEE_NAME: "The Tea House" });
+  expect((await server.staff("PUT", "/api/flags/ops.counterFirst", { value: true })).status).toBe(200);
+  const page = await (await browser.newContext(phone)).newPage();
+  await page.goto(`${server.base}/`);
+  await page.getByRole("button", { name: "Add Veg Momos S/F" }).click();
+  await page.getByTestId("cart-bar").click();
+  await page.getByRole("button", { name: "Place order" }).click();
+  await page.getByRole("button", { name: "I've paid" }).click();
+  await expect(page.getByText("You said you paid ₹60. Staff will check it.")).toBeVisible();
+  await expect(page.getByTestId("claimed-first")).toHaveText(
+    "The kitchen starts once the counter confirms your payment.",
+  );
 });

@@ -183,6 +183,50 @@ only then; the event banner on the splash and the storefront; `npm run gate` and
 currency in minor units; duplicates merged across pages; add-ons mapped to extras; a priceless item in the report; HTML
 stripped in code; the failure messages; `npm run gate` green.
 
+## M16 The floor: sections, runners, guest messages, timers, search, operations switches (owner, 2026-11-27)
+From a 3.5-crore café's owner and the owner's demo calls: "pay at the counter first, the counter approves, then the kitchen
+starts"; five runners with five phones, one section each; a guest should be able to ask their runner something; every
+card needs a running timer; ten orders on the counter need a search, not scrolling. Decisions D-101 to D-106 are claimed
+for this branch.
+- [x] Operations switches (D-101): a third flag scope, `ops`, flipped by the manager and the owner from the links hub and
+  audited like the others. Simple, few, each one line: `ops.upi` (guests may pay by UPI; default on where UPI is set up),
+  `ops.counterFirst` (orders reach the stations only once the counter has confirmed payment; room-bill orders go straight
+  through; default off), `ops.messages` (guests may message their runner; default on), `ops.sections` (runners see their
+  own sections first; default on). Off-by-default keeps every existing install unchanged.
+- [x] One payment banner (D-101): when only one way to pay is left (UPI off, not a room), the cart shows no choice, only a
+  banner ("Pay at the counter to confirm your order" with counterFirst, "Pay at the counter" without); the token page
+  says the same until paid. Ordered ≠ Received holds: nothing reads as paid until a person confirmed it.
+- [x] Sections the owner edits (D-102): the owner and the manager add, rename and delete sections and their spots at runtime
+  (stored, overriding `spots.json` for table sections); room sections stay in `spots.json`, since their QR keys depend on
+  them. A deleted spot's open orders keep their label. The Spots page prints the edited spots.
+- [x] Runners own sections (D-103): the manager, owner or counter assigns each section to a staff account for the day (any
+  number of sections per person; a section may have nobody). With `ops.sections` the runner screen shows "My sections"
+  first with an "All" switch; a section with nobody shows to everyone, so no order is orphaned. Every handover records
+  who made it (`servedBy`), for the owner's report. Guests never see staff names.
+- [x] The floor (D-103): one screen for the counter, manager and owner: each section as a block of its spots, coloured by
+  state (free, ordered, ready to carry, late, has an unanswered message), with the section's runner; tap a spot for its
+  open orders; assign a section's runner from here.
+- [x] Guest messages (D-104): on the token page a guest sends a short message (and quick chips: water, bill please, help,
+  add something) to their order; it reaches the runner of that spot's section, or every runner and the counter when the
+  section has nobody, on the existing live stream with a sound and speech; the runner replies in one tap (canned: "Coming",
+  "2 minutes") or a short line, and the guest sees it. At most 20 messages an order, 200 characters each, rate-limited per
+  order; message text is cleared after `retentionDays` like notes; no new polling, no new stream.
+- [x] A running timer on every open card (D-105): station, counter and runner cards show the time since ordering (m:ss,
+  then h:mm) in the top-right corner, amber past half of `lateMinutes`, red past it; one interval per screen updates
+  the text in place, never a re-render; nothing on the server.
+- [x] Search (D-106): counter, stations and runner get one search box that opens a digit keypad: "39" finds token 26-039;
+  letters find a spot ("B1") or a guest's name. Matches move to the top and are highlighted; clearing restores the queue
+  order. The queue itself stays oldest first.
+- [x] A kitchen without a screen: with no station screen in use, the runner can hand over lines that were never marked ready
+  (already allowed; verified by a test and stated in docs/configure.md).
+**Checkpoint:** unit tests for each switch's default and its effect (counterFirst hides an unpaid order from every station
+until confirmed; a room-bill order passes; UPI off removes the UPI route's use from the cart); section edits validated and
+rooms refused; assignments filter the runner view and an unassigned section shows to all; `servedBy` recorded; messages
+capped, rate-limited, routed and cleared by retention; the search matcher (token suffix, spot, name). Browser tests: a
+counter-first order appears on the kitchen only after the counter confirms; a guest message reaches the section's runner
+and the reply reaches the guest; a timer ticks on a station card; the counter search finds token 39. The 300-order day's
+added rows stated in D-104. `npm run gate` and `npm run e2e` green.
+
 ## Log
 - 2026-11-07 Started from the owner's earlier counter app, run live at a real tea-and-snack shop since 2025-12; rebuilt as open source (AGPL-3.0) on 2026-11-07.
 - 2026-11-07 M0 toolchain, .env.example, README stub; M1 core (config, routing, orders, tokens, batches, payments) and live-shop + 300-order rush fixtures, 47 tests green on a fresh clone; LICENSE still a placeholder awaiting the canonical AGPL text (32d9b86..d8035f8).
@@ -230,3 +274,4 @@ stripped in code; the failure messages; `npm run gate` green.
 - 2026-11-25 Release review changes: a room key of the wrong shape is a 403, not a 500; New QR on Spots rotates one room's key (D-082 corrected); the storefront takes the key out of the address bar; import price strings with more than one number are odd and currency words are dropped, unsure items written switched off (D-092 corrected) (ac6804b..HEAD).
 - 2026-11-26 Found by an end-to-end recording of a café demo: the status follows the floor (a station's first ready line moves a pending order to preparing; the last dish handed over closes it when nothing is owed; the guest sees Served; the counter's advance can't skip a step from a stale screen) (D-097); demo sign-ins come filled in, with one-tap roles (D-098); 746 unit + 34 browser tests green.
 - 2026-11-27 Status check corrections: the public `main` was rewritten once on 2026-11-26, with the owner's approval, so the two 2026-11-25 commits name the owner instead of an unrelated `noreply` account (D-099); the live demo serves the D-097 and D-098 code (checked from its bundles; the server itself was not reachable); README screenshots and GIF regenerated in the M11/M13 look (`npm run screenshots` now waits for the splash and transitions to finish); README first load corrected to about 40 KB gzip; CHANGELOG covers M10 to M15; dev-only undici and sharp patched by overrides, 0 audit findings (D-100); the M6 repo item ticked and the M9 wrangler item dropped at the owner's word; four merged worktrees removed.
+- 2026-11-27 M16 the floor (owner's demo calls): operations switches for manager and owner (UPI off, counter-first keeps unpaid orders off every station path, one payment banner) (D-101); table sections edited at run time, rooms config-only, renames keep ids (D-102); a runner per section for the day, My sections, the floor screen, handovers record who made them (D-103); guest messages to the section's runner over the live stream with chips and one-tap replies, presence routing, caps, retention (D-104); a running timer on every open card (D-105); one search with the keypad on counter, stations and runner (D-106); review must-fixes (completed orders with an unanswered message survive a reload; UPI claims refused while UPI is off) and nice-to-haves done; 815 unit + 45 browser tests green (281346d..HEAD).

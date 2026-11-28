@@ -5,7 +5,8 @@
  * carried (the cold chai and the warm latte).
  */
 
-import type { Order } from "./orders.ts";
+import { type OrderMessage, unanswered } from "./messages.ts";
+import { type Order, reachesStations } from "./orders.ts";
 
 export type RunnerLineState = "making" | "ready" | "delivered";
 
@@ -26,6 +27,8 @@ export interface RunnerOrder {
   id: string;
   token: string;
   spot?: string;
+  /** The spot's id, which places the order in its section (D-103); absent on orders taken before it was kept. */
+  spotId?: string;
   customerName?: string;
   createdAt: number;
   lines: RunnerLine[];
@@ -35,14 +38,24 @@ export interface RunnerOrder {
   /** Lines ready and waiting to be carried out. */
   toCarry: number;
   late?: LateReason;
+  /** The thread with the guest (D-104), oldest first. */
+  messages?: readonly OrderMessage[];
+  /** The guest's last message has no reply yet. */
+  unanswered?: true;
+  /** Taken under counter-first and not yet confirmed (D-101): on no station, so nothing to hand over yet. */
+  awaitingPayment?: true;
 }
 
-/** Open orders for the runner: late ones first, then the oldest. Completed orders are not listed. */
+/**
+ * Open orders for the runner: late ones first, then the oldest. Completed or fully handed-over orders are not listed,
+ * unless their guest waits for an answer to a message (D-104).
+ */
 export function runnerOrders(orders: readonly Order[], now: number, lateMs: number): RunnerOrder[] {
   const out: RunnerOrder[] = [];
   for (const o of orders) {
     // Nothing left to carry once every line is handed over, even before the counter marks the order done.
-    if (o.status === "completed" || o.lines.every((l) => l.served)) continue;
+    const waiting = unanswered(o);
+    if ((o.status === "completed" || o.lines.every((l) => l.served)) && !waiting) continue;
     const lines = o.lines.map((l, index): RunnerLine => {
       const state: RunnerLineState = l.served ? "delivered" : l.ready ? "ready" : "making";
       return {
@@ -66,7 +79,11 @@ export function runnerOrders(orders: readonly Order[], now: number, lateMs: numb
       waitingOn: [...new Set(lines.filter((l) => l.state === "making").map((l) => l.stationId))],
       toCarry: lines.filter((l) => l.state === "ready").length,
       ...(o.spot === undefined ? {} : { spot: o.spot }),
+      ...(o.spotId === undefined ? {} : { spotId: o.spotId }),
       ...(o.customerName === undefined ? {} : { customerName: o.customerName }),
+      ...(o.messages === undefined || o.messages.length === 0 ? {} : { messages: o.messages }),
+      ...(waiting ? { unanswered: true as const } : {}),
+      ...(reachesStations(o) ? {} : { awaitingPayment: true as const }),
     };
     const firstServed = Math.min(...o.lines.flatMap((l) => (l.servedAt === undefined ? [] : [l.servedAt])));
     const oldestReady = Math.min(

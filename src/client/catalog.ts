@@ -10,7 +10,10 @@ export interface StoreCatalog {
     maxQtyPerLine: number;
     hours?: { open: string; close: string; lastOrder?: string };
   };
-  payments: { upi: boolean; card?: boolean };
+  /** `counterFirst`: the kitchen starts once the counter has confirmed the payment (D-101). */
+  payments: { upi: boolean; card?: boolean; counterFirst?: boolean };
+  /** Guests may message the staff from their order (`ops.messages`, D-104). */
+  messages?: true;
   categories: Category[];
   /** What is left today of items the owner counts (item id to units); absent when none is counted. */
   left?: Record<string, number>;

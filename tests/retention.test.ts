@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { DEFAULT_RETENTION_DAYS, parseBusiness } from "../src/core/config.ts";
-import { advanceStatus, createOrder } from "../src/core/orders.ts";
+import { guestMessage, staffReply } from "../src/core/messages.ts";
+import { advanceStatus, createOrder, type Order } from "../src/core/orders.ts";
 import { startRetention } from "../src/server/retention.ts";
 import { openStore } from "../src/store/node.ts";
 import type { Store } from "../src/store/store.ts";
@@ -67,7 +68,7 @@ describe("retention", () => {
     const old = place(store, t0, "Asha");
     const recent = place(store, t0 + 20 * DAY, "Ravi");
     const cleared = store.forgetCustomers(t0 + 10 * DAY);
-    expect(cleared).toEqual({ orders: 1, events: 2, reviews: 1, notes: 0 });
+    expect(cleared).toEqual({ orders: 1, events: 2, reviews: 1, notes: 0, messages: 0 });
 
     expect(store.getOrder(old)?.order.customerName).toBeUndefined();
     expect(store.getReview(old)).toEqual({ orderId: old, rating: 5, at: t0 + 180_000 });
@@ -81,7 +82,7 @@ describe("retention", () => {
     expect(store.getReview(recent)?.text).toBe("Lovely, says Ravi");
     for (const e of store.eventsAfter(0, { orderId: recent })) expect(e.order.customerName).toBe("Ravi");
     // A second pass finds nothing left to clear.
-    expect(store.forgetCustomers(t0 + 10 * DAY)).toEqual({ orders: 0, events: 0, reviews: 0, notes: 0 });
+    expect(store.forgetCustomers(t0 + 10 * DAY)).toEqual({ orders: 0, events: 0, reviews: 0, notes: 0, messages: 0 });
   });
 
   test("each pass reads only what came of age since the last one, from a mark kept in the store", () => {
@@ -94,7 +95,7 @@ describe("retention", () => {
       expect(store.forgetCustomers(t0 + DAY)).toMatchObject({ orders: 1, reviews: 1 });
       expect(store.retentionMark()).toBe(t0 + DAY);
       // An earlier cutoff (retentionDays raised) has nothing left to do and keeps the mark.
-      expect(store.forgetCustomers(t0)).toEqual({ orders: 0, events: 0, reviews: 0, notes: 0 });
+      expect(store.forgetCustomers(t0)).toEqual({ orders: 0, events: 0, reviews: 0, notes: 0, messages: 0 });
       expect(store.retentionMark()).toBe(t0 + DAY);
       store.close();
       store = openStore(path);
@@ -207,7 +208,7 @@ describe("retention", () => {
       raw.exec("DROP TABLE scratch");
       // Back to schema 7, the last before the VACUUM step: undo the migrations after it (the retention mark, the day totals, the local fields, the theme override).
       raw.exec(
-        "DROP TABLE room_bill_moves; DROP TABLE calendar_events; DROP TABLE room_settlements; DROP INDEX orders_room_open; ALTER TABLE orders DROP COLUMN room; ALTER TABLE orders DROP COLUMN room_settled; DROP TABLE meta; DROP TABLE telemetry_hours; DROP TABLE flag_audit; DROP TABLE flags; DROP TABLE payment_refunds; DROP TABLE daily_counts; DROP TABLE theme_override; DROP TABLE day_totals; DROP TABLE retention; DROP INDEX reviews_at; DROP INDEX payments_day; DROP INDEX payment_top_ups_day; DROP INDEX orders_unlocal; DROP INDEX payments_unlocal; DROP INDEX payment_top_ups_unlocal;" +
+        "DROP INDEX orders_done_messages; ALTER TABLE orders DROP COLUMN messages; DROP TABLE section_runners; DROP TABLE sections; ALTER TABLE order_lines DROP COLUMN served_by; ALTER TABLE orders DROP COLUMN spot_id; DROP TABLE room_bill_moves; DROP TABLE calendar_events; DROP TABLE room_settlements; DROP INDEX orders_room_open; ALTER TABLE orders DROP COLUMN pays_first; ALTER TABLE orders DROP COLUMN room; ALTER TABLE orders DROP COLUMN room_settled; DROP TABLE meta; DROP TABLE telemetry_hours; DROP TABLE flag_audit; DROP TABLE flags; DROP TABLE payment_refunds; DROP TABLE daily_counts; DROP TABLE theme_override; DROP TABLE day_totals; DROP TABLE retention; DROP INDEX reviews_at; DROP INDEX payments_day; DROP INDEX payment_top_ups_day; DROP INDEX orders_unlocal; DROP INDEX payments_unlocal; DROP INDEX payment_top_ups_unlocal;" +
           "ALTER TABLE orders DROP COLUMN local_min; ALTER TABLE payments DROP COLUMN day; ALTER TABLE payments DROP COLUMN local_min;" +
           "ALTER TABLE payment_top_ups DROP COLUMN day; ALTER TABLE payment_top_ups DROP COLUMN local_min;" +
           "ALTER TABLE orders DROP COLUMN spot; ALTER TABLE order_lines DROP COLUMN extras; ALTER TABLE order_lines DROP COLUMN note; ALTER TABLE order_lines DROP COLUMN ready_at; ALTER TABLE order_lines DROP COLUMN served_at; PRAGMA user_version = 7",
@@ -311,6 +312,88 @@ describe("line notes go with names (D-073)", () => {
       const check = new DatabaseSync(path);
       const seen = (check.prepare("SELECT value FROM seen").all() as { value: string | null }[]).map((r) => r.value);
       expect(seen).toEqual([" ".repeat("forZanzibarqueen".length), null]);
+      check.close();
+      for (const f of [path, `${path}-wal`]) {
+        if (existsSync(f)) expect(readFileSync(f).toString("latin1")).not.toContain("Zanzibarqueen");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("guest messages go with notes (D-104)", () => {
+  function withMessages(store: Store, at: number, text: string): string {
+    const id = place(store, at);
+    const { order } = store.getOrder(id) as { order: Order };
+    let o = guestMessage(order, { text }, at + 1000, "asha");
+    o = staffReply(o, { chip: "coming" }, at + 2000, "asha");
+    o = guestMessage(o, { chip: "water" }, at + 20_000, undefined);
+    store.saveMessages(o, at + 2000);
+    return id;
+  }
+
+  test("saveMessages writes the order's row and one event, and the thread reads back", () => {
+    const store = fresh();
+    const id = withMessages(store, t0, "a table by the window");
+    const { order } = store.getOrder(id) as { order: Order };
+    // The driver counts run() changes (the event's RETURNING insert is outside the count for every save alike): one
+    // row for the messages against the whole order's rows for saveOrder.
+    let before = store.rowsWritten();
+    store.saveOrder(order, "order.updated", t0 + 29_000);
+    const whole = store.rowsWritten() - before;
+    before = store.rowsWritten();
+    store.saveMessages(staffReply(order, { text: "done" }, t0 + 30_000, "asha"), t0 + 30_000);
+    expect(store.rowsWritten() - before).toBe(1);
+    expect(whole).toBeGreaterThan(4);
+    expect(store.getOrder(id)?.order.messages?.map((m) => m.text ?? m.chip)).toEqual([
+      "a table by the window",
+      "coming",
+      "water",
+      "done",
+    ]);
+    expect(store.eventsAfter(0, { orderId: id }).at(-1)?.order.messages).toHaveLength(4);
+  });
+
+  test("message text is cleared from the order and every snapshot after retentionDays; chips and times stay", () => {
+    const store = fresh();
+    const old = withMessages(store, t0, "for Priyanka at the back");
+    const recent = withMessages(store, t0 + 20 * DAY, "for Rohan");
+    expect(store.forgetCustomers(t0 + 10 * DAY)).toMatchObject({ messages: 1 });
+    expect(store.getOrder(old)?.order.messages).toEqual([
+      { at: t0 + 1000, from: "guest", to: "asha" },
+      { at: t0 + 2000, from: "staff", chip: "coming", by: "asha" },
+      { at: t0 + 20_000, from: "guest", chip: "water" },
+    ]);
+    for (const e of store.eventsAfter(0, { orderId: old })) {
+      expect(JSON.stringify(e.order)).not.toContain("Priyanka");
+      expect(e.order.lines.map((l) => l.qty)).toEqual([2]);
+    }
+    expect(store.getOrder(recent)?.order.messages?.[0]?.text).toBe("for Rohan");
+    for (const e of store.eventsAfter(0, { orderId: recent })) {
+      if (e.order.messages !== undefined) expect(e.order.messages[0]?.text).toBe("for Rohan");
+    }
+  });
+
+  test("the text is overwritten with spaces first and is gone from the database file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ibow-msg-"));
+    try {
+      const path = join(dir, "ibow.db");
+      const store = openStore(path);
+      withMessages(store, t0, "forZanzibarqueen");
+      store.close();
+      const raw = new DatabaseSync(path);
+      raw.exec(`CREATE TABLE seen (value TEXT);
+        CREATE TRIGGER seen_m AFTER UPDATE OF messages ON orders BEGIN INSERT INTO seen VALUES (new.messages); END;`);
+      raw.close();
+      const again = openStore(path);
+      again.forgetCustomers(t0 + 10 * DAY);
+      again.close();
+      const check = new DatabaseSync(path);
+      const seen = (check.prepare("SELECT value FROM seen").all() as { value: string }[]).map((r) => r.value);
+      expect(seen).toHaveLength(2);
+      expect(seen[0]).toContain(`"text":"${" ".repeat("forZanzibarqueen".length)}"`);
+      expect(seen[1]).not.toContain('"text"');
       check.close();
       for (const f of [path, `${path}-wal`]) {
         if (existsSync(f)) expect(readFileSync(f).toString("latin1")).not.toContain("Zanzibarqueen");

@@ -3,11 +3,8 @@
  * to the station, and the runner screen follows the order from "being made" to delivered.
  */
 
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { anyHourConfig } from "./helpers.ts";
 import { OWNER_PIN, type RunningServer, startServer } from "./server.ts";
 
 let server: RunningServer | undefined;
@@ -15,20 +12,6 @@ test.afterEach(async () => {
   await server?.stop();
   server = undefined;
 });
-
-/**
- * The sample with its opening hours taken out, so ordering works whatever the time is where the test runs (the sample
- * stops taking orders after its last-order time; that rule has its own unit tests).
- */
-function anyHourConfig(): string {
-  const dir = mkdtempSync(join(tmpdir(), "ibow-e2e-cfg-"));
-  cpSync(fileURLToPath(new URL("../samples/garden-cafe", import.meta.url)), dir, { recursive: true });
-  const file = join(dir, "business.json");
-  const business = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
-  delete business.hours;
-  writeFileSync(file, JSON.stringify(business));
-  return dir;
-}
 
 const phone = { isMobile: true, hasTouch: true, viewport: { width: 390, height: 844 } };
 

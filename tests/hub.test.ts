@@ -25,6 +25,10 @@ describe("the list", () => {
       "/staff#/station/kitchen",
     ]);
     expect(hubLinks({ stations: [], hasSpots: false, ai: false }).some((l) => l.id === "owner-spots")).toBe(false);
+    // Without spots there is no floor to show; the sections editor stays, since it is where the first section is added.
+    const bare = hubLinks({ stations: [], hasSpots: false, ai: false }).map((l) => l.id);
+    expect(bare).not.toContain("floor");
+    expect(bare).toContain("sections");
   });
 
   test("a signed-out visitor sees only the public links", () => {
@@ -40,17 +44,31 @@ describe("the list", () => {
       }
     }
     const ids = (level: Level) => linksFor(all, level).map((l) => l.id);
-    expect(ids("staff")).toEqual(["storefront", "kiosk", "counter", "station-bar", "station-kitchen", "runner"]);
-    expect(ids("manager")).toEqual([...ids("staff"), "manager"]);
+    expect(ids("staff")).toEqual([
+      "storefront",
+      "kiosk",
+      "counter",
+      "station-bar",
+      "station-kitchen",
+      "runner",
+      "floor",
+    ]);
+    expect(ids("manager")).toEqual([...ids("staff"), "manager", "sections", "switches"]);
     expect(ids("admin")).toEqual(["storefront", "kiosk", "health", "system-switches"]);
     expect(ids("owner")).not.toContain("health");
     expect(ids("owner")).toContain("owner-appearance");
+  });
+
+  test("the owner is offered one link to the switches page, not one per scope", () => {
+    const toSwitches = linksFor(all, "owner").filter((l) => l.href === "/admin#/switches");
+    expect(toSwitches.map((l) => l.id)).toEqual(["switches"]);
   });
 
   test("station-only staff are not offered the counter or the runner", () => {
     const ids = linksFor(all, "staff", "station").map((l) => l.id);
     expect(ids).not.toContain("counter");
     expect(ids).not.toContain("runner");
+    expect(ids).not.toContain("floor");
     expect(ids).toContain("station-bar");
   });
 

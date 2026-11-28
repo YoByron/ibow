@@ -12,11 +12,14 @@ import {
   renderBatch,
 } from "../core/batches.ts";
 import type { CalendarEvent } from "../core/calendar.ts";
-import type { CatalogItem, StationView } from "../core/config.ts";
+import type { CatalogItem, StationView, Zone } from "../core/config.ts";
+import { floorState, mineFirst, type Runners } from "../core/floor.ts";
+import { type StaffChip, unanswered } from "../core/messages.ts";
 import { formatMoney, formatPrice } from "../core/money.ts";
 import { isReady, onOpenRoomBill, UNDO_WINDOW_MS } from "../core/orders.ts";
 import type { PaymentMethod } from "../core/payments.ts";
 import { type RunnerOrder, runnerOrders } from "../core/runner.ts";
+import { searchFirst } from "../core/search.ts";
 import { orderNumber, orderNumbers } from "../core/tokens.ts";
 import type { StaffOrderView, StationLine, StationOrderView } from "../core/views.ts";
 import { announce, primeSound } from "./alerts.ts";
@@ -34,15 +37,21 @@ import { openOptions } from "./options-sheet.ts";
 import { printTickets, type Ticket } from "./print.ts";
 import { qrSvg } from "./qr.ts";
 import { newClientKey, tabStore } from "./session.ts";
+import { floorBlocks } from "./staff-floor.ts";
 import { managerBody } from "./staff-manager.ts";
 import { refundBlock } from "./staff-refund.ts";
 import { roomsBody } from "./staff-rooms.ts";
+import { sectionsBody } from "./staff-sections.ts";
 import { t } from "./staff-strings.ts";
+import { messageText, threadBlock } from "./staff-thread.ts";
 import { lang } from "./strings.ts";
+import { startTimers, timer } from "./timers.ts";
 import { roundButton, button as uiButton } from "./ui/button.ts";
+import { pill } from "./ui/chip.ts";
 import { appHeader } from "./ui/header.ts";
 import { icon, iconRef } from "./ui/icon.ts";
 import { keypad } from "./ui/keypad.ts";
+import { type SearchBox, searchBox } from "./ui/search.ts";
 import { transition, watchBoot } from "./ui/shell.ts";
 import { stat } from "./ui/stat.ts";
 import { FALLBACK, initMode, loadThemeInfo, type ThemeInfo, toggleMode, watchTheme } from "./ui/theme-client.ts";
@@ -80,6 +89,8 @@ let access: "counter" | "station" | "all" = "all";
 let refunds: { can: boolean; limitMinor?: number | undefined } = { can: false };
 /** The powers of the signed-in level (`/api/me`), so a screen shows only what this person may open. */
 let powers: readonly string[] = [];
+/** Who is signed in (`/api/me`): the runner screen puts their own sections first (D-103). */
+let signedIn = "";
 
 function localStorageOrUndefined(): Storage | undefined {
   try {
@@ -94,6 +105,41 @@ const money = (minor: number) => formatPrice(minor, catalog.business.currency, l
 const exactMoney = (minor: number) => formatMoney(minor, catalog.business.currency, locale);
 const price = (itemId: string, size?: string, extras?: readonly string[]) => priceOfLine(catalog, itemId, size, extras);
 const max = () => catalog.business.maxQtyPerLine;
+/** The business's late time in ms: a timer turns amber past half of it and red past it (D-105). */
+const lateMs = () => catalog.business.lateMinutes * 60_000;
+const clock = (at: number) =>
+  new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", timeZone: catalog.business.timeZone }).format(
+    at,
+  );
+
+/**
+ * Sounds and speaks a guest's new message on this screen when it is meant for it (D-104): `forMe` reads the message's
+ * `to` (the runner it went to; absent, everyone). Only messages newer than the screen's copy of the order count.
+ */
+function speakMessage(
+  before: { messages?: StaffOrderView["messages"] } | undefined,
+  after: StaffOrderView,
+  forMe: (to: string | undefined) => boolean,
+): void {
+  const seen = before?.messages?.at(-1)?.at ?? Number.NEGATIVE_INFINITY;
+  const fresh = (after.messages ?? []).filter((m) => m.at > seen && m.from === "guest" && forMe(m.to)).at(-1);
+  if (fresh === undefined) return;
+  const text = t("messageAlert", { token: after.token, spot: after.spot ?? "", text: messageText(fresh) });
+  announce(text, "");
+  if (!voice.muted()) voice.say(text);
+}
+
+/** The reply route for a card's thread. */
+const replyTo = (id: string, body: { chip: StaffChip } | { text: string }) =>
+  api<{ order: StaffOrderView }>("POST", `/api/orders/${encodeURIComponent(id)}/reply`, { body });
+
+/** A card's badge while its guest waits for an answer. */
+function messageBadge(o: { token: string; messages?: StaffOrderView["messages"] }): Child {
+  return (
+    unanswered(o) &&
+    h("span", { class: "chip warn msg-badge", "data-testid": `msg-badge-${o.token}` }, icon("bell"), t("messageBadge"))
+  );
+}
 const stationName = (id: string) => stations.find((s) => s.id === id)?.name ?? id;
 /** One line as text for screens and speech: the item and size, its extras, then the note. */
 const lineText = (l: {
@@ -148,6 +194,32 @@ function action(label: string, key: string, run: () => Promise<unknown>, error: 
     }
   });
   return b;
+}
+
+/** A screen's one search control (D-106), made once; every change redraws the list with the matches on top. */
+function screenSearch(rerender: () => void): SearchBox {
+  return searchBox({
+    labels: {
+      search: t("searchOrders"),
+      placeholder: t("searchPlaceholder"),
+      keypad: t("searchKeypad"),
+      clear: t("searchClear"),
+      delete: t("pinDelete"),
+    },
+    onChange: () => keepFocus(rerender),
+  });
+}
+
+/** Says so when a search finds nothing, so an empty query and a missed one never look alike. */
+function noMatch(query: string, found: number): Child {
+  const q = query.trim();
+  return q !== "" && found === 0 && h("p", { class: "hint", role: "status" }, t("noOrderMatch", { q }));
+}
+
+/** Marks a card a search found. */
+function ringed(el: HTMLElement, matched: boolean): HTMLElement {
+  if (matched) el.classList.add("match");
+  return el;
 }
 
 /** Sets the accessible name of a button whose visible text is a symbol. */
@@ -349,6 +421,9 @@ function chooserView(): void {
         access !== "station" && screenTile("#/counter", t("counterTitle"), t("counterHint"), "receipt", true),
         access !== "station" && screenTile("#/runner", t("runnerTitle"), t("runnerHint"), "map_pin"),
         access !== "station" && hasRooms() && screenTile("#/rooms", t("roomsTitle"), t("roomsHint"), "bell"),
+        access !== "station" && hasSpots() && screenTile("#/floor", t("floorTitle"), t("floorHint"), "map_pin"),
+        powers.includes("sections.edit") &&
+          screenTile("#/sections", t("sectionsTitle"), t("sectionsHint"), "clipboard"),
         powers.includes("menu.switch") && screenTile("#/manager", t("managerTitle"), t("managerHint"), "clipboard"),
         ...stations.map((s) =>
           screenTile(`#/station/${encodeURIComponent(s.id)}`, s.name, t("stationHint"), stationIcon(s)),
@@ -412,13 +487,16 @@ async function counterView(): Promise<void> {
   const gen = ++generation;
   const snap = await api<{ orders: StaffOrderView[]; lastEventId: number }>("GET", "/api/orders");
   if (gen !== generation) return;
-  const orders = new Map(snap.orders.map((o) => [o.id, o]));
+  // The counter works open orders; a completed one in the snapshot (its guest waits for an answer, D-104) is the runner's.
+  const orders = new Map(snap.orders.filter((o) => o.status !== "completed").map((o) => [o.id, o]));
   /** Completed in the last 5 minutes, so a wrong "collected" can be undone. */
   const recent = new Map<string, StaffOrderView>();
   let tab: Tab = "pending";
+  const search = screenSearch(() => render());
   let cashFor: { id: string; received?: number } | undefined;
   let quick: Quick | undefined;
   const error = h("p", { class: "error", role: "alert" });
+  const drafts = new Map<string, string>();
 
   const apply = (o: StaffOrderView) => {
     if (o.status === "completed") {
@@ -539,7 +617,18 @@ async function counterView(): Promise<void> {
         o.customerName !== undefined && h("span", {}, o.customerName),
         o.spot !== undefined && h("span", { class: "spot-badge" }, o.spot),
         isReady(o) && h("span", { class: "badge ready" }, t("readyBadge")),
+        messageBadge(o),
+        timer(o.createdAt, serverNow(), lateMs()),
       ),
+      threadBlock(o, {
+        reply: async (body) => {
+          apply((await replyTo(o.id, body)).order);
+          keepFocus(render);
+        },
+        action: (label, key, run, cls = "") => action(label, key, run, error, cls),
+        drafts,
+        clock,
+      }),
       h(
         "ul",
         { class: "lines" },
@@ -634,7 +723,10 @@ async function counterView(): Promise<void> {
         h("b", {}, String(count(x))),
         h("small", {}, label.replace(/\s*\d+\s*$/, "")),
       );
-    const shown = all.filter((o) => tabOf(o) === tab);
+    // A search looks in every tab: what it finds goes on top, then this tab's queue as it was (D-106).
+    const inTab = all.filter((o) => tabOf(o) === tab);
+    const found = searchFirst(all, search.value()).matched;
+    const shown = [...all.filter((o) => found.has(o)), ...inTab.filter((o) => !found.has(o))];
     const now = serverNow();
     for (const [id, o] of recent) {
       const at = o.history.at(-1)?.at ?? 0;
@@ -668,8 +760,12 @@ async function counterView(): Promise<void> {
           tabButton("preparing", t("tabPreparing", { n: String(count("preparing")) })),
           tabButton("ready", t("tabReady", { n: String(count("ready")) })),
         ),
+        search.el,
+        noMatch(search.value(), found.size),
         error,
-        ...(shown.length === 0 ? [h("p", { class: "empty" }, t("noOrders"))] : shown.map(card)),
+        ...(shown.length === 0
+          ? [h("p", { class: "empty" }, t("noOrders"))]
+          : shown.map((o) => ringed(card(o), found.has(o)))),
         recent.size > 0 && h("h2", {}, t("recentlyDone")),
         ...[...recent.values()].map((o) =>
           h(
@@ -1039,8 +1135,10 @@ async function counterView(): Promise<void> {
       poll: "/api/poll/counter",
       after: snap.lastEventId,
       onEvent: (e: OrderEvent<StaffOrderView>) => {
-        const before = orders.get(e.order.id);
+        const before = orders.get(e.order.id) ?? recent.get(e.order.id);
         apply(e.order);
+        // The counter speaks a message only when the spot's section has nobody running it (D-104).
+        speakMessage(before, e.order, (to) => to === undefined);
         if (e.type === "order.created") announce(t("newOrderAlert", { token: e.order.token }), "");
         else if (e.order.status !== "completed" && isReady(e.order) && (before === undefined || !isReady(before))) {
           announce(t("readyAlert", { token: e.order.token }), "");
@@ -1053,7 +1151,7 @@ async function counterView(): Promise<void> {
   const tick = setInterval(() => {
     if (!quick) keepFocus(render);
   }, 30_000);
-  cleanup.push(() => clearInterval(tick));
+  cleanup.push(() => clearInterval(tick), startTimers(root, serverNow, lateMs()));
   render();
 }
 
@@ -1065,14 +1163,27 @@ async function counterView(): Promise<void> {
  */
 async function runnerView(): Promise<void> {
   const gen = ++generation;
-  const snap = await api<{ orders: StaffOrderView[]; lastEventId: number }>("GET", "/api/orders");
+  const [snap, first] = await Promise.all([
+    api<{ orders: StaffOrderView[]; lastEventId: number }>("GET", "/api/orders"),
+    hasSpots() ? api<SectionsInfo>("GET", "/api/sections") : Promise.resolve(undefined),
+  ]);
   if (gen !== generation) return;
+  let sections = first;
+  /** With sections on, a runner sees their own sections (and those with nobody) unless they switch to All (D-103). */
+  let showAll = false;
   const orders = new Map(snap.orders.map((o) => [o.id, o]));
   const error = h("p", { class: "error", role: "alert" });
   const lateMs = catalog.business.lateMinutes * 60_000;
   const announced = new Set<string>();
+  const search = screenSearch(() => render());
+  const drafts = new Map<string, string>();
 
   const rows = () => runnerOrders([...orders.values()], serverNow(), lateMs);
+  /** Kept while open, or while its guest waits for an answer (D-104). */
+  const keep = (o: StaffOrderView) => {
+    if (o.status === "completed" && !unanswered(o)) orders.delete(o.id);
+    else orders.set(o.id, o);
+  };
   const serve = async (o: RunnerOrder, indexes: number[]) => {
     for (const i of indexes) {
       const r = await api<{ order: StaffOrderView }>(
@@ -1080,8 +1191,7 @@ async function runnerView(): Promise<void> {
         `/api/orders/${encodeURIComponent(o.id)}/lines/${i}/served`,
         { body: {} },
       );
-      if (r.order.status === "completed") orders.delete(r.order.id);
-      else orders.set(r.order.id, r.order);
+      keep(r.order);
     }
     keepFocus(render);
   };
@@ -1100,7 +1210,20 @@ async function runnerView(): Promise<void> {
         h("span", { class: "token" }, orderNumber(o.token)),
         o.spot !== undefined && h("span", { class: "spot-badge" }, o.spot),
         o.late !== undefined && h("span", { class: "chip err" }, t("lateBadge")),
+        o.awaitingPayment === true &&
+          h("span", { class: "chip warn", "data-testid": `awaiting-${o.token}` }, t("awaitingPayment")),
+        messageBadge(o),
+        timer(o.createdAt, serverNow(), lateMs),
       ),
+      threadBlock(o, {
+        reply: async (body) => {
+          keep((await replyTo(o.id, body)).order);
+          keepFocus(render);
+        },
+        action: (label, key, run, cls = "") => action(label, key, run, error, cls),
+        drafts,
+        clock,
+      }),
       h(
         "p",
         { class: "hint" },
@@ -1108,26 +1231,25 @@ async function runnerView(): Promise<void> {
         o.waitingOn.length > 0 && ` · ${t("waitingOn", { stations: waiting })}`,
         o.toCarry > 0 && ` · ${t("toCarry", { n: String(o.toCarry) })}`,
       ),
+      // One column of text and one of buttons: Delivered sits at the right edge of every line, under the right thumb.
       h(
         "ul",
-        { class: "lines" },
+        { class: "lines run-lines" },
         ...o.lines.map((l) =>
           h(
             "li",
             { class: l.state === "delivered" ? "served" : "" },
             h(
-              "span",
-              { class: "line-name" },
-              lineText({
-                qty: l.qty,
-                name: l.name,
-                ...(l.size === undefined ? {} : { size: l.size }),
-                ...(l.extras === undefined ? {} : { extras: l.extras.map((name) => ({ name })) }),
-                ...(l.note === undefined ? {} : { note: l.note }),
-              }),
+              "div",
+              { class: "line-text" },
+              h("span", { class: "line-name" }, runnerLineText(l)),
+              h("span", { class: "hint" }, stationName(l.stationId), " · ", stateText(l.state)),
             ),
-            h("span", { class: "hint" }, stationName(l.stationId), " · ", stateText(l.state)),
-            l.state === "ready" && action(t("deliver"), `deliver-${o.id}-${l.index}`, () => serve(o, [l.index]), error),
+            // Offered on lines still being made too: a kitchen without a station screen never marks anything ready.
+            // Not while it waits for the counter's confirmation (D-101): the kitchen has not seen it.
+            l.state !== "delivered" &&
+              o.awaitingPayment !== true &&
+              action(t("deliver"), `deliver-${o.id}-${l.index}`, () => serve(o, [l.index]), error),
           ),
         ),
       ),
@@ -1136,8 +1258,16 @@ async function runnerView(): Promise<void> {
     );
   }
 
+  /** What this runner sees: with sections on, their own first, the others only under All. */
+  function visible(list: RunnerOrder[]): { mine: RunnerOrder[]; rest: RunnerOrder[]; split: boolean } {
+    if (sections === undefined || !sections.on) return { mine: list, rest: [], split: false };
+    const { mine, rest } = mineFirst(list, sections.zones, sections.runners, signedIn);
+    return { mine, rest: showAll ? rest : [], split: true };
+  }
+
   function alertLate(): void {
-    for (const o of rows()) {
+    const { mine, rest } = visible(rows());
+    for (const o of [...mine, ...rest]) {
       const key = `${o.id}:${o.late}`;
       if (o.late === undefined || announced.has(key)) continue;
       announced.add(key);
@@ -1150,15 +1280,33 @@ async function runnerView(): Promise<void> {
 
   function render(): void {
     if (gen !== generation) return;
-    const list = rows();
+    const { list, matched } = searchFirst(rows(), search.value());
+    const { mine, rest, split } = visible(list);
+    const cards = (part: RunnerOrder[]) => part.map((o) => ringed(card(o), matched.has(o)));
+    const toggle = (all: boolean) => () => {
+      showAll = all;
+      keepFocus(render);
+    };
     mount(
       root,
       header(t("runnerTitle"), t("runnerSub")),
       h(
         "main",
         { class: "runner" },
+        search.el,
+        split &&
+          h(
+            "div",
+            { class: "run-scope", role: "group", "aria-label": t("sectionsShown") },
+            pill({ label: t("mySections"), selected: !showAll, onClick: toggle(false), testid: "scope-mine" }),
+            pill({ label: t("allSections"), selected: showAll, onClick: toggle(true), testid: "scope-all" }),
+          ),
+        noMatch(search.value(), matched.size),
         error,
-        ...(list.length === 0 ? [h("p", { class: "empty" }, t("noRunnerOrders"))] : list.map(card)),
+        split && h("h2", { class: "run-group" }, t("mySections")),
+        ...(mine.length === 0 ? [h("p", { class: "empty" }, t("noRunnerOrders"))] : cards(mine)),
+        rest.length > 0 && h("h2", { class: "run-group" }, t("otherSections")),
+        ...cards(rest),
       ),
     );
     alertLate();
@@ -1170,14 +1318,29 @@ async function runnerView(): Promise<void> {
       poll: "/api/poll/counter",
       after: snap.lastEventId,
       onEvent: (e: OrderEvent<StaffOrderView>) => {
-        if (e.order.status === "completed") orders.delete(e.order.id);
-        else orders.set(e.order.id, e.order);
+        const before = orders.get(e.order.id);
+        keep(e.order);
+        // A message to this runner, or to everyone when its section has nobody (D-104).
+        speakMessage(before, e.order, (to) => to === undefined || to === signedIn);
         keepFocus(render);
       },
     }),
   );
-  const tick = setInterval(() => keepFocus(render), 30_000);
-  cleanup.push(() => clearInterval(tick));
+  cleanup.push(
+    everyMinute(
+      () => {
+        if (sections === undefined) return;
+        void api<SectionsInfo>("GET", "/api/sections")
+          .then((next) => {
+            sections = next;
+            keepFocus(render);
+          })
+          .catch(() => undefined);
+      },
+      () => keepFocus(render),
+    ),
+    startTimers(root, serverNow, lateMs),
+  );
   render();
 }
 
@@ -1279,21 +1442,20 @@ async function stationScreen(id: string): Promise<void> {
     return keys;
   };
   let known = openKeys();
+  const search = screenSearch(() => render());
   let arrival: ReturnType<typeof setTimeout> | undefined;
   cleanup.push(() => clearTimeout(arrival));
 
   /** Oldest first, as the server lists them; only orders with something still to make here. */
   const open = () =>
     [...orders.values()].filter((o) => o.lines.some((l) => isOpen(o, l))).sort((a, b) => a.createdAt - b.createdAt);
-  /** How long the oldest open ticket has waited, as of this draw; a timer redraws it every 30 s. */
+  /** How long the oldest open ticket has waited: a running timer, ticked in place with every card's (D-105). */
   const oldestAge = () => {
     const first = open()[0];
-    return first === undefined
-      ? "–"
-      : t("oldestAge", { n: String(Math.max(0, Math.floor((serverNow() - first.createdAt) / 60_000))) });
+    return first === undefined ? "–" : timer(first.createdAt, serverNow(), lateMs());
   };
   const tick = setInterval(() => keepFocus(render), 30_000);
-  cleanup.push(() => clearInterval(tick));
+  cleanup.push(() => clearInterval(tick), startTimers(root, serverNow, lateMs()));
   const batchText = () => renderBatch(openBatch(open(), id), template);
 
   /** The last "ready" tap, which an Undo chip can take back for UNDO_WINDOW_MS: one mis-tap must not stand. */
@@ -1340,13 +1502,23 @@ async function stationScreen(id: string): Promise<void> {
   function batchBody(): Child[] {
     const list = open();
     const batch = openBatch(list, id);
+    // A search puts the dishes of the orders it finds first, and their numbers first among the chips (D-106).
+    const hit = new Set([...searchFirst(list, search.value()).matched].map((o) => o.token));
+    const groups = groupBatch(list, id).map((g) => ({
+      ...g,
+      rows: g.rows.map((r) => ({
+        ...r,
+        tokens: [...r.tokens.filter((tk) => hit.has(tk)), ...r.tokens.filter((tk) => !hit.has(tk))],
+      })),
+    }));
+    const hasHit = (g: (typeof groups)[number]) => g.rows.some((r) => r.tokens.some((tk) => hit.has(tk)));
     return [
       h(
         "div",
         { class: "row" },
         batch.lines.length > 0 && action(t("allReady"), "all-ready", () => ready(refsOf(() => true)), error, "primary"),
       ),
-      ...groupBatch(list, id).map((g, gi) =>
+      ...[...groups.filter(hasHit), ...groups.filter((g) => !hasHit(g))].map((g, gi) =>
         h(
           "section",
           { class: "bgroup", "data-testid": `item-${g.itemId}` },
@@ -1387,16 +1559,17 @@ async function stationScreen(id: string): Promise<void> {
                         .join(", "),
                     }),
                   },
-                  ...r.tokens
-                    .slice(0, r.tokens.length > CHIPS + 1 ? CHIPS : r.tokens.length)
-                    .map((tk) =>
-                      h(
-                        "i",
-                        { title: orderNumbers(r.spots?.[tk] === undefined ? tk : `${tk} ${r.spots?.[tk]}`) },
-                        chipText(tk),
-                        r.spots?.[tk] !== undefined && h("small", { class: "spot-badge" }, r.spots?.[tk]),
-                      ),
+                  ...r.tokens.slice(0, r.tokens.length > CHIPS + 1 ? CHIPS : r.tokens.length).map((tk) =>
+                    h(
+                      "i",
+                      {
+                        title: orderNumbers(r.spots?.[tk] === undefined ? tk : `${tk} ${r.spots?.[tk]}`),
+                        ...(hit.has(tk) ? { class: "match" } : {}),
+                      },
+                      chipText(tk),
+                      r.spots?.[tk] !== undefined && h("small", { class: "spot-badge" }, r.spots?.[tk]),
                     ),
+                  ),
                   r.tokens.length > CHIPS + 1 && h("i", {}, t("moreTokens", { n: String(r.tokens.length - CHIPS) })),
                 ),
                 labelled(
@@ -1449,58 +1622,62 @@ async function stationScreen(id: string): Promise<void> {
   }
 
   function jobsBody(): Child[] {
-    const list = open();
+    const { list, matched } = searchFirst(open(), search.value());
     if (list.length === 0) return [h("p", { class: "empty" }, t("noJobs"))];
     return list.map((o) =>
-      h(
-        "article",
-        { class: "order-card", "data-testid": `job-${o.token}` },
+      ringed(
         h(
-          "div",
-          { class: "card-head" },
-          h("span", { class: "token" }, orderNumber(o.token)),
-          o.customerName !== undefined && h("span", {}, o.customerName),
-          o.spot !== undefined && h("span", { class: "spot-badge" }, o.spot),
-        ),
-        h(
-          "ul",
-          { class: "lines" },
-          ...o.lines
-            .filter((l) => isOpen(o, l))
-            .map((l) =>
-              h(
-                "li",
-                {},
-                h("span", { class: "line-name" }, lineText(l)),
-                action(
-                  t("markReady"),
-                  `ready-${o.id}-${l.index}`,
-                  () => ready([{ orderId: o.id, index: l.index }]),
-                  error,
-                ),
-              ),
-            ),
-        ),
-        h(
-          "div",
-          { class: "row" },
-          action(
-            t("jobReady"),
-            `job-ready-${o.id}`,
-            () => ready(o.lines.filter((l) => isOpen(o, l)).map((l) => ({ orderId: o.id, index: l.index }))),
-            error,
-            "primary",
+          "article",
+          { class: "order-card", "data-testid": `job-${o.token}` },
+          h(
+            "div",
+            { class: "card-head" },
+            h("span", { class: "token" }, orderNumber(o.token)),
+            o.customerName !== undefined && h("span", {}, o.customerName),
+            o.spot !== undefined && h("span", { class: "spot-badge" }, o.spot),
+            timer(o.createdAt, serverNow(), lateMs()),
           ),
           h(
-            "button",
-            {
-              type: "button",
-              "data-key": `print-${o.id}`,
-              on: { click: () => printTickets([stationTicket(o, info as StationInfo)], locale) },
-            },
-            t("printTicket"),
+            "ul",
+            { class: "lines" },
+            ...o.lines
+              .filter((l) => isOpen(o, l))
+              .map((l) =>
+                h(
+                  "li",
+                  {},
+                  h("span", { class: "line-name" }, lineText(l)),
+                  action(
+                    t("markReady"),
+                    `ready-${o.id}-${l.index}`,
+                    () => ready([{ orderId: o.id, index: l.index }]),
+                    error,
+                  ),
+                ),
+              ),
+          ),
+          h(
+            "div",
+            { class: "row" },
+            action(
+              t("jobReady"),
+              `job-ready-${o.id}`,
+              () => ready(o.lines.filter((l) => isOpen(o, l)).map((l) => ({ orderId: o.id, index: l.index }))),
+              error,
+              "primary",
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                "data-key": `print-${o.id}`,
+                on: { click: () => printTickets([stationTicket(o, info as StationInfo)], locale) },
+              },
+              t("printTicket"),
+            ),
           ),
         ),
+        matched.has(o),
       ),
     );
   }
@@ -1544,6 +1721,8 @@ async function stationScreen(id: string): Promise<void> {
           }),
           stat({ label: t("oldest"), value: oldestAge() }),
         ),
+        search.el,
+        noMatch(search.value(), searchFirst(open(), search.value()).matched.size),
         error,
         lastReady &&
           h(
@@ -1606,6 +1785,8 @@ async function route(): Promise<void> {
     const m = /^#\/station\/(.+)$/.exec(hash);
     if (hash === "#/manager" && powers.includes("menu.switch")) return void managerScreen().catch(showFailure);
     if (hash === "#/rooms" && access !== "station" && hasRooms()) return void roomsScreen().catch(showFailure);
+    if (hash === "#/floor" && access !== "station") return startGate(() => void floorView().catch(showFailure));
+    if (hash === "#/sections" && powers.includes("sections.edit")) return void sectionsScreen().catch(showFailure);
     if (m) return startGate(() => void stationScreen(decodeURIComponent(m[1] as string)).catch(showFailure));
     chooserView();
   } catch (e) {
@@ -1677,6 +1858,142 @@ async function managerScreen(): Promise<void> {
   await draw();
 }
 
+/** Whether the business has spots: a zone in the layout in force (spots.json, or the owner's edited sections). */
+function hasSpots(): boolean {
+  return (catalog.zones?.length ?? 0) > 0;
+}
+
+/** What the runner and the floor read of the sections (D-103): the layout, the day's runners, who may run. */
+interface SectionsInfo {
+  on: boolean;
+  zones: Zone[];
+  runners: Runners;
+  staff: { id: string; name: string }[];
+}
+
+/** The sections editor (D-102); a save refreshes the catalog this page holds, so the walk-in spot list follows. */
+async function sectionsScreen(): Promise<void> {
+  const gen = ++generation;
+  const error = h("p", { class: "error", role: "alert" });
+  const body = await sectionsBody(
+    () => {
+      void api<StaffCatalog>("GET", "/api/catalog").then((c) => {
+        catalog = c;
+      });
+    },
+    (e) => {
+      error.textContent = failureText(e);
+    },
+    error,
+  );
+  if (gen === generation) {
+    mount(root, header(t("sectionsTitle"), t("sectionsSub")), h("main", { class: "sections" }, ...body));
+  }
+}
+
+/** Reads the runners and the layout again every other 30 s tick, so a change made on another phone shows within a minute. */
+function everyMinute(read: () => void, each: () => void): () => void {
+  let ticks = 0;
+  const tick = setInterval(() => {
+    if (++ticks % 2 === 0) read();
+    each();
+  }, 30_000);
+  return () => clearInterval(tick);
+}
+
+/**
+ * The floor (D-103): each section's spots coloured by state, live on the counter's stream; the runners and the layout are
+ * read again each minute, so an assignment made on another phone shows without a reload.
+ */
+async function floorView(): Promise<void> {
+  const gen = ++generation;
+  const [snap, first] = await Promise.all([
+    api<{ orders: StaffOrderView[]; lastEventId: number }>("GET", "/api/orders"),
+    api<SectionsInfo>("GET", "/api/sections"),
+  ]);
+  if (gen !== generation) return;
+  let info = first;
+  const orders = new Map(snap.orders.map((o) => [o.id, o]));
+  const error = h("p", { class: "error", role: "alert" });
+  const assign = (section: string, user: string | null) => {
+    error.textContent = "";
+    api("PUT", `/api/sections/${encodeURIComponent(section)}/runner`, { body: { user } })
+      .then(() => {
+        const runners: Record<string, string> = { ...info.runners };
+        if (user === null) delete runners[section];
+        else runners[section] = user;
+        info = { ...info, runners };
+        keepFocus(render);
+      })
+      .catch((e: unknown) => {
+        error.textContent = failureText(e);
+      });
+  };
+  function render(): void {
+    if (gen !== generation) return;
+    const rows = runnerOrders([...orders.values()], serverNow(), lateMs());
+    // A spot whose guest waits for an answer to a message shows as such (D-104).
+    const floor = floorState(
+      info.zones,
+      rows,
+      info.runners,
+      new Set(rows.filter((r) => r.unanswered).map((r) => r.id)),
+    );
+    mount(
+      root,
+      header(t("floorTitle"), t("floorSub")),
+      h(
+        "main",
+        { class: "floor" },
+        error,
+        ...floorBlocks(floor, {
+          staff: info.staff,
+          rows: new Map(rows.map((r) => [r.id, r])),
+          assign,
+          stationName,
+          lineText: runnerLineText,
+        }),
+      ),
+    );
+  }
+  cleanup.push(
+    followStream<StaffOrderView>({
+      stream: "/api/stream/counter",
+      poll: "/api/poll/counter",
+      after: snap.lastEventId,
+      onEvent: (e: OrderEvent<StaffOrderView>) => {
+        if (e.order.status === "completed" && !unanswered(e.order)) orders.delete(e.order.id);
+        else orders.set(e.order.id, e.order);
+        keepFocus(render);
+      },
+    }),
+  );
+  cleanup.push(
+    everyMinute(
+      () =>
+        void api<SectionsInfo>("GET", "/api/sections")
+          .then((next) => {
+            info = next;
+            keepFocus(render);
+          })
+          .catch(() => undefined),
+      () => keepFocus(render),
+    ),
+  );
+  render();
+}
+
+/** A runner line as text, the same way the counter writes a line. */
+function runnerLineText(l: RunnerOrder["lines"][number]): string {
+  return lineText({
+    qty: l.qty,
+    name: l.name,
+    ...(l.size === undefined ? {} : { size: l.size }),
+    ...(l.extras === undefined ? {} : { extras: l.extras.map((name) => ({ name })) }),
+    ...(l.note === undefined ? {} : { note: l.note }),
+  });
+}
+
 /** Whether the business lets rooms: a zone of kind room in spots.json. */
 function hasRooms(): boolean {
   return catalog.zones?.some((z) => z.kind === "room") === true;
@@ -1734,6 +2051,7 @@ async function start(): Promise<void> {
     document.title = `${t("staffTitle")} · ${catalog.business.name}`;
     try {
       const me = await api<{
+        user: string;
         access: typeof access;
         canRefund: boolean;
         refundLimitMinor?: number;
@@ -1742,6 +2060,7 @@ async function start(): Promise<void> {
       // The system admin signs in at /admin and works no counter or station: here that is a sign-in screen.
       if (!me.powers.includes("orders.view")) return loginView();
       powers = me.powers;
+      signedIn = me.user;
       access = me.access;
       refunds = { can: me.canRefund, limitMinor: me.refundLimitMinor };
     } catch (e) {

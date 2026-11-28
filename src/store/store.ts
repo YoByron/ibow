@@ -16,6 +16,7 @@ import {
   type Sale,
 } from "../core/insights.ts";
 import type { Level } from "../core/levels.ts";
+import type { OrderMessage } from "../core/messages.ts";
 import {
   type LineExtra,
   type Order,
@@ -78,6 +79,8 @@ export interface ForgetResult {
   reviews: number;
   /** Order lines whose note was cleared: a note can carry a name ("for Priya"), so it goes with names (D-073). */
   notes: number;
+  /** Orders whose guest-message text was cleared (D-104); chips stay, they carry nothing personal. */
+  messages: number;
 }
 
 export interface FlagAuditRow {
@@ -128,8 +131,18 @@ export interface Store {
   findByToken(token: string, day: string): Order | undefined;
   /** Orders not yet completed, oldest first. */
   openOrders(): Order[];
+  /**
+   * Completed orders placed at or after `since` whose guest's last message has no reply (D-104), oldest first: one range
+   * over a partial index that holds only completed orders with messages.
+   */
+  waitingCompleted(since: number): Order[];
   /** Persists the changed order and appends its event, in one transaction. */
   saveOrder(order: Order, type: EventType, now: number): StoredEvent;
+  /**
+   * Persists only the order's messages (D-104) and appends its event: two rows written, where `saveOrder` rewrites the
+   * lines, history and payment as well.
+   */
+  saveMessages(order: Order, now: number): StoredEvent;
   eventsAfter(afterId: number, filter: EventFilter, limit?: number): StoredEvent[];
   lastEventId(): number;
   /** Deletes events logged before `before` (the replay log only; orders stay) and returns how many went. */
@@ -164,6 +177,13 @@ export interface Store {
   setDailyCount(itemId: string, day: string, remaining: number | undefined): void;
   /** What is left today of each counted item; counts set for another day are not listed. */
   dailyCounts(day: string): Map<string, number>;
+  /** The owner's edited table sections as saved JSON text (D-102), or undefined while spots.json's are in force. */
+  sectionsLayout(): string | undefined;
+  setSectionsLayout(json: string): void;
+  /** Each section's runner on a business day (D-103); a section with nobody, or set on another day, is not listed. */
+  sectionRunners(day: string): Map<string, string>;
+  /** Gives a section to a staff member for the day, or to nobody (`undefined`): one row per section at most. */
+  setSectionRunner(section: string, day: string, user: string | undefined): void;
   /** The owner's Appearance override as saved JSON text, or undefined when the config's theme is in use. */
   themeOverride(): string | undefined;
   /** Saves the override, or clears it (`undefined`: reset to the config's theme). */
@@ -201,6 +221,11 @@ export interface Store {
    * their longest wait in ms. One aggregate over the day's lines (reached through the day index), no row per order.
    */
   carryStats(day: string): { lines: number; totalMs: number; maxMs: number };
+  /**
+   * Handovers of a business day per person who made them (D-103): how many lines, and of those with a ready time, how
+   * many and their summed ready-to-delivered ms. One aggregate over the day's lines, most handovers first.
+   */
+  runnerStats(day: string): { user: string; handovers: number; timed: number; totalMs: number }[];
   /**
    * The totals of these days: stored ones as they were closed, the others read live (a day with no orders is left out).
    * Bounded by the number of days asked for, never by how many orders there are.
@@ -450,6 +475,18 @@ const MIGRATIONS: readonly string[] = [
      level TEXT NOT NULL,
      reason TEXT
    );`,
+  // Taken under counter-first (D-101): kept off the stations until its payment is confirmed. Fixed at ordering.
+  `ALTER TABLE orders ADD COLUMN pays_first INTEGER;`,
+  // The floor (D-102, D-103): each order's spot id beside its label, who handed each line over, the owner's edited table
+  // sections as one JSON row (absent: spots.json's), and each section's runner for one business day.
+  `ALTER TABLE orders ADD COLUMN spot_id TEXT;
+   ALTER TABLE order_lines ADD COLUMN served_by TEXT;
+   CREATE TABLE sections (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL);
+   CREATE TABLE section_runners (section TEXT PRIMARY KEY, day TEXT NOT NULL, user TEXT NOT NULL);`,
+  // Guest messages and replies (D-104): a JSON list on the order's row, written alone by saveMessages.
+  "ALTER TABLE orders ADD COLUMN messages TEXT;",
+  // Completed orders with a thread (D-104), so the staff snapshot finds those whose guest waits without a scan.
+  "CREATE INDEX orders_done_messages ON orders (created_at) WHERE status = 'completed' AND messages IS NOT NULL;",
 ];
 
 /** How many of the newest orders the best-seller query reads, and how many waits the median reads: the cost is bounded. */
@@ -473,6 +510,19 @@ export const CARRY_SQL = `SELECT COUNT(*) AS n, COALESCE(SUM(l.served_at - l.rea
     COALESCE(MAX(l.served_at - l.ready_at), 0) AS worst
   FROM orders o JOIN order_lines l ON l.order_id = o.id
   WHERE o.day = ? AND l.ready_at IS NOT NULL AND l.served_at IS NOT NULL`;
+
+/** Completed orders since a time whose last message is the guest's (D-104), through their partial index. */
+export const WAITING_DONE_SQL = `SELECT id FROM orders INDEXED BY orders_done_messages
+  WHERE status = 'completed' AND messages IS NOT NULL AND created_at >= ?
+    AND json_extract(messages, '$[#-1].from') = 'guest'
+  ORDER BY created_at, rowid`;
+
+/** Handovers per person on a business day (D-103), over the day's lines reached through the orders' day index. */
+export const RUNNER_SQL = `SELECT l.served_by AS user, COUNT(*) AS n,
+    COUNT(l.ready_at) AS timed, COALESCE(SUM(l.served_at - l.ready_at), 0) AS total
+  FROM orders o JOIN order_lines l ON l.order_id = o.id
+  WHERE o.day = ? AND l.served_by IS NOT NULL
+  GROUP BY l.served_by ORDER BY n DESC, user`;
 
 export const BACKFILL_SQL = {
   orders: "SELECT id, created_at FROM orders INDEXED BY orders_unlocal WHERE local_min IS NULL",
@@ -591,13 +641,26 @@ function blank(column: string): string {
  * Parameters: the window's start and end. The lines are rebuilt in order from `json_each`.
  */
 function eventNotesSql(edit: string): string {
+  return eventListSql("lines", "note", edit);
+}
+
+/** The same over `$.<list>[*]` for the items that have `<field>` (the notes of lines, the text of messages). */
+function eventListSql(list: string, field: string, edit: string): string {
   // json(...) around the subquery: newer SQLite drops the JSON subtype across a subquery, and json_set would then
   // store the list as a string (found on CI, SQLite 3.5x).
-  return `UPDATE events SET data = json_set(data, '$.lines', json((
-      SELECT json_group_array(json(CASE WHEN json_extract(v.value, '$.note') IS NOT NULL THEN ${edit} ELSE v.value END))
-      FROM (SELECT value, key FROM json_each(events.data, '$.lines') ORDER BY key) v)))
+  return `UPDATE events SET data = json_set(data, '$.${list}', json((
+      SELECT json_group_array(json(CASE WHEN json_extract(v.value, '$.${field}') IS NOT NULL THEN ${edit} ELSE v.value END))
+      FROM (SELECT value, key FROM json_each(events.data, '$.${list}') ORDER BY key) v)))
     WHERE order_id IN (SELECT id FROM orders WHERE created_at >= ? AND created_at < ?)
-      AND data LIKE '%"note":%'`;
+      AND json_type(data, '$.${list}') = 'array' AND data LIKE '%"${field}":%'`;
+}
+
+/** Rewrites each message of `orders.messages` that has text, for orders placed in a window (D-104). */
+function orderMessagesSql(edit: string): string {
+  return `UPDATE orders SET messages = json((
+      SELECT json_group_array(json(CASE WHEN json_extract(v.value, '$.text') IS NOT NULL THEN ${edit} ELSE v.value END))
+      FROM (SELECT value, key FROM json_each(orders.messages) ORDER BY key) v))
+    WHERE created_at >= ? AND created_at < ? AND messages LIKE '%"text":%'`;
 }
 
 function rowToLine(l: Row): OrderLine {
@@ -614,6 +677,7 @@ function rowToLine(l: Row): OrderLine {
   if (l.note !== null) line.note = l.note as string;
   if (l.ready_at !== null) line.readyAt = l.ready_at as number;
   if (l.served_at !== null) line.servedAt = l.served_at as number;
+  if (l.served_by !== null && l.served_by !== undefined) line.servedBy = l.served_by as string;
   return l.size === null ? line : { ...line, size: l.size as string };
 }
 
@@ -678,6 +742,16 @@ export function createStore(d: SqlDriver): Store {
       eventNotesSql(`json_set(v.value, '$.note', ${blank("json_extract(v.value, '$.note')")})`),
     ),
     forgetEventNotes: d.prepare(eventNotesSql("json_remove(v.value, '$.note')")),
+    // Message text goes like a note (D-104): spaces of the same byte length, then removed, on the order and in snapshots.
+    blankMessages: d.prepare(
+      orderMessagesSql(`json_set(v.value, '$.text', ${blank("json_extract(v.value, '$.text')")})`),
+    ),
+    forgetMessages: d.prepare(orderMessagesSql("json_remove(v.value, '$.text')")),
+    blankEventMessages: d.prepare(
+      eventListSql("messages", "text", `json_set(v.value, '$.text', ${blank("json_extract(v.value, '$.text')")})`),
+    ),
+    forgetEventMessages: d.prepare(eventListSql("messages", "text", "json_remove(v.value, '$.text')")),
+    putMessages: d.prepare("UPDATE orders SET messages = ? WHERE id = ?"),
     forgetNames: d.prepare(
       "UPDATE orders SET customer_name = NULL WHERE created_at >= ? AND created_at < ? AND customer_name IS NOT NULL",
     ),
@@ -699,6 +773,7 @@ export function createStore(d: SqlDriver): Store {
     counts: d.prepare("SELECT item_id, remaining FROM daily_counts WHERE day = ?"),
     spendCount: d.prepare("UPDATE daily_counts SET remaining = remaining - ? WHERE item_id = ? AND day = ?"),
     carry: d.prepare(CARRY_SQL),
+    runnerStats: d.prepare(RUNNER_SQL),
     topSellers: d.prepare(FIGURE_SQL.topSellers),
     waits: d.prepare(FIGURE_SQL.waits),
     themeGet: d.prepare("SELECT json FROM theme_override WHERE id = 1"),
@@ -706,6 +781,16 @@ export function createStore(d: SqlDriver): Store {
       "INSERT INTO theme_override (id, json) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET json = excluded.json",
     ),
     themeClear: d.prepare("DELETE FROM theme_override WHERE id = 1"),
+    sectionsGet: d.prepare("SELECT json FROM sections WHERE id = 1"),
+    sectionsSet: d.prepare(
+      "INSERT INTO sections (id, json) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET json = excluded.json",
+    ),
+    runners: d.prepare("SELECT section, user FROM section_runners WHERE day = ? ORDER BY section"),
+    putRunner: d.prepare(
+      `INSERT INTO section_runners (section, day, user) VALUES (?, ?, ?)
+       ON CONFLICT (section) DO UPDATE SET day = excluded.day, user = excluded.user`,
+    ),
+    clearRunner: d.prepare("DELETE FROM section_runners WHERE section = ?"),
     onDay: d.prepare("SELECT id FROM orders WHERE day = ? ORDER BY created_at, rowid"),
     salesPayments: d.prepare(REPORT_SQL.salesPayments),
     salesTopUps: d.prepare(REPORT_SQL.salesTopUps),
@@ -727,8 +812,8 @@ export function createStore(d: SqlDriver): Store {
       "INSERT INTO token_counters (day, value) VALUES (?, ?) ON CONFLICT (day) DO UPDATE SET value = excluded.value",
     ),
     insertOrder: d.prepare(
-      `INSERT INTO orders (id, secret, client_key, day, token, created_at, currency, customer_name, status, local_min, spot, room)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO orders (id, secret, client_key, day, token, created_at, currency, customer_name, status, local_min, spot, room, pays_first, spot_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     updateOrder: d.prepare("UPDATE orders SET customer_name = ?, status = ?, room = ?, room_settled = ? WHERE id = ?"),
     insertMove: d.prepare(
@@ -751,12 +836,13 @@ export function createStore(d: SqlDriver): Store {
     order: d.prepare("SELECT * FROM orders WHERE id = ?"),
     byToken: d.prepare("SELECT id FROM orders WHERE token = ? AND day = ?"),
     open: d.prepare("SELECT id FROM orders WHERE status != 'completed' ORDER BY created_at, rowid"),
+    waitingDone: d.prepare(WAITING_DONE_SQL),
     lines: d.prepare("SELECT * FROM order_lines WHERE order_id = ? ORDER BY idx"),
     lineStations: d.prepare("SELECT DISTINCT station_id FROM order_lines WHERE order_id = ?"),
     deleteLines: d.prepare("DELETE FROM order_lines WHERE order_id = ?"),
     insertLine: d.prepare(
-      `INSERT INTO order_lines (order_id, idx, item_id, name, size, qty, unit_minor, station_id, served, ready, extras, note, ready_at, served_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO order_lines (order_id, idx, item_id, name, size, qty, unit_minor, station_id, served, ready, extras, note, ready_at, served_at, served_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     history: d.prepare("SELECT * FROM status_changes WHERE order_id = ? ORDER BY seq"),
     deleteHistory: d.prepare("DELETE FROM status_changes WHERE order_id = ?"),
@@ -874,11 +960,16 @@ export function createStore(d: SqlDriver): Store {
     };
     if (row.customer_name !== null) order.customerName = row.customer_name as string;
     if (row.spot !== null) order.spot = row.spot as string;
+    if (row.spot_id !== null) order.spotId = row.spot_id as string;
     if (row.room !== null) {
       order.roomBill =
         row.room_settled === null
           ? { room: row.room as string }
           : { room: row.room as string, settlement: row.room_settled as number };
+    }
+    if (row.pays_first === 1) order.paysFirst = true;
+    if (row.messages !== null && row.messages !== undefined) {
+      order.messages = JSON.parse(row.messages as string) as OrderMessage[];
     }
     return { order, secret: row.secret as string };
   }
@@ -925,6 +1016,7 @@ export function createStore(d: SqlDriver): Store {
         l.note ?? null,
         l.readyAt ?? null,
         l.servedAt ?? null,
+        l.servedBy ?? null,
       );
     });
     q.deleteHistory.run(order.id);
@@ -1136,6 +1228,15 @@ export function createStore(d: SqlDriver): Store {
       return new Map((q.counts.all(day) as Row[]).map((r) => [r.item_id as string, r.remaining as number]));
     },
 
+    runnerStats(day) {
+      return (q.runnerStats.all(day) as Row[]).map((r) => ({
+        user: r.user as string,
+        handovers: r.n as number,
+        timed: r.timed as number,
+        totalMs: r.total as number,
+      }));
+    },
+
     carryStats(day) {
       const r = q.carry.get(day) as Row;
       return { lines: r.n as number, totalMs: r.total as number, maxMs: r.worst as number };
@@ -1173,6 +1274,8 @@ export function createStore(d: SqlDriver): Store {
           zoned(order.createdAt).min,
           order.spot ?? null,
           order.roomBill?.room ?? null,
+          order.paysFirst === true ? 1 : null,
+          order.spotId ?? null,
         );
         writeParts(order);
         const event = appendEvent(order, "order.created", input.now, []);
@@ -1191,8 +1294,28 @@ export function createStore(d: SqlDriver): Store {
       return (q.open.all() as Row[]).map((r) => (readOrder(r.id as string) as { order: Order }).order);
     },
 
+    waitingCompleted(since) {
+      return (q.waitingDone.all(since) as Row[]).map((r) => (readOrder(r.id as string) as { order: Order }).order);
+    },
+
     saveOrder(order, type, now) {
       return tx(() => writeOrder(order, type, now));
+    },
+
+    saveMessages(order, now) {
+      return tx(() => {
+        const json =
+          order.messages === undefined || order.messages.length === 0 ? null : JSON.stringify(order.messages);
+        if (q.putMessages.run(json, order.id).changes !== 1) {
+          throw new Error(`saveMessages: expected a stored order ${order.id}, found none`);
+        }
+        return appendEvent(
+          order,
+          "order.updated",
+          now,
+          order.lines.map((l) => l.stationId),
+        );
+      });
     },
 
     openRoomOrders() {
@@ -1370,9 +1493,11 @@ export function createStore(d: SqlDriver): Store {
     forgetCustomers(cutoff) {
       const result = tx(() => {
         const from = (q.retentionMark.get() as Row).cutoff as number;
-        if (cutoff <= from) return { orders: 0, events: 0, reviews: 0, notes: 0 };
+        if (cutoff <= from) return { orders: 0, events: 0, reviews: 0, notes: 0, messages: 0 };
         q.blankNotes.run(from, cutoff);
         q.blankEventNotes.run(from, cutoff);
+        q.blankMessages.run(from, cutoff);
+        q.blankEventMessages.run(from, cutoff);
         q.blankNames.run(from, cutoff);
         q.blankEventNames.run(from, cutoff);
         q.blankReviewText.run(from, cutoff);
@@ -1381,13 +1506,15 @@ export function createStore(d: SqlDriver): Store {
           events: Number(q.forgetEventNames.run(from, cutoff).changes),
           reviews: Number(q.forgetReviewText.run(from, cutoff).changes),
           notes: Number(q.forgetNotes.run(from, cutoff).changes),
+          messages: Number(q.forgetMessages.run(from, cutoff).changes),
         };
         q.forgetEventNotes.run(from, cutoff);
+        q.forgetEventMessages.run(from, cutoff);
         q.setRetentionMark.run(cutoff);
         return changed;
       });
       // The old page images may still sit in a write-ahead log until a checkpoint; the driver flushes it where it can.
-      if (result.orders + result.events + result.reviews + result.notes > 0) d.afterForget();
+      if (result.orders + result.events + result.reviews + result.notes + result.messages > 0) d.afterForget();
       return result;
     },
 
@@ -1400,6 +1527,19 @@ export function createStore(d: SqlDriver): Store {
     },
     recentWaitsMs(from) {
       return (q.waits.all(from) as Row[]).map((r) => r.wait as number);
+    },
+    sectionsLayout() {
+      return (q.sectionsGet.get() as Row | undefined)?.json as string | undefined;
+    },
+    setSectionsLayout(json) {
+      q.sectionsSet.run(json);
+    },
+    sectionRunners(day) {
+      return new Map((q.runners.all(day) as Row[]).map((r) => [r.section as string, r.user as string]));
+    },
+    setSectionRunner(section, day, user) {
+      if (user === undefined) q.clearRunner.run(section);
+      else q.putRunner.run(section, day, user);
     },
     themeOverride() {
       return (q.themeGet.get() as Row | undefined)?.json as string | undefined;
@@ -1505,6 +1645,8 @@ export function createStore(d: SqlDriver): Store {
         staff: all("staff", "id, name, role"),
         calendar_events: all("calendar_events", "id, data, created_at"),
         item_availability: all("item_availability"),
+        sections: all("sections"),
+        section_runners: all("section_runners"),
         token_counters: all("token_counters"),
       };
     },

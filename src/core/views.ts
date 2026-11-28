@@ -1,5 +1,6 @@
 /** What each audience may see of an order. A station sees only its own lines; a customer sees no staff details. */
 
+import { messagesUntil, type OrderMessage } from "./messages.ts";
 import {
   EDIT_WINDOW_MS,
   isReady,
@@ -33,6 +34,8 @@ export interface CustomerOrderView {
   spot?: string;
   /** On the room bill: `open` until the room is settled at checkout, then `settled` (D-082). */
   roomBill?: "open" | "settled";
+  /** Taken under counter-first (D-101): the kitchen starts once the counter has confirmed the payment. */
+  paysFirst?: true;
   status: OrderStatus;
   lines: {
     itemId: string;
@@ -54,6 +57,10 @@ export interface CustomerOrderView {
   payment: { state: "unpaid" } | { state: "claimed" | "confirmed"; method: PaymentMethod; amountMinor: number };
   /** Until when the customer may still change the order, if the rules allow it now. */
   editableUntil?: number;
+  /** The thread with the runner (D-104), without who on the staff sent or received what. */
+  messages?: Pick<OrderMessage, "at" | "from" | "text" | "chip">[];
+  /** Once completed: until when the guest may still send a message. */
+  messagesUntil?: number;
 }
 
 /** A station line keeps its index in the whole order, which is what "mark served" takes. */
@@ -104,8 +111,19 @@ export function customerView(order: Order): CustomerOrderView {
   };
   if (order.customerName !== undefined) view.customerName = order.customerName;
   if (order.spot !== undefined) view.spot = order.spot;
+  if (order.paysFirst === true) view.paysFirst = true;
   if (order.roomBill !== undefined) view.roomBill = order.roomBill.settlement === undefined ? "open" : "settled";
   if (order.status === "pending" && p.state === "unpaid") view.editableUntil = order.createdAt + EDIT_WINDOW_MS;
+  if (order.messages !== undefined && order.messages.length > 0) {
+    view.messages = order.messages.map((m) => ({
+      at: m.at,
+      from: m.from,
+      ...(m.text === undefined ? {} : { text: m.text }),
+      ...(m.chip === undefined ? {} : { chip: m.chip }),
+    }));
+  }
+  const until = messagesUntil(order);
+  if (until !== undefined) view.messagesUntil = until;
   return view;
 }
 

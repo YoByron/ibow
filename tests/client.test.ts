@@ -115,7 +115,16 @@ describe("strings and rendering", () => {
     const baseKey = (key: string) => pluralForm(key)?.base ?? key;
     const keysIn = (src: string) => new Set([...src.matchAll(/\btn?\("([A-Za-z]+)"/g)].map((m) => m[1]));
     const files = clientFiles(/\.ts$/).filter(({ file }) => !/strings\.ts$/.test(file));
-    const staffFiles = new Set(["staff.ts", "print.ts", "staff-refund.ts", "staff-manager.ts", "staff-rooms.ts"]);
+    const staffFiles = new Set([
+      "staff.ts",
+      "print.ts",
+      "staff-refund.ts",
+      "staff-manager.ts",
+      "staff-rooms.ts",
+      "staff-floor.ts",
+      "staff-sections.ts",
+      "staff-thread.ts",
+    ]);
     const ownerFiles = new Set(["owner.ts", "owner-view.ts", "owner-appearance.ts", "owner-spots.ts"]);
     const owner = keysIn(
       files

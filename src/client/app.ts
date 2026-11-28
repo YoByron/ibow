@@ -36,6 +36,7 @@ import {
 } from "./catalog.ts";
 import { type Child, h, mount } from "./dom.ts";
 import { eventLineSlot, guestEventSlot } from "./events.ts";
+import { guestMessages, guestMessageText } from "./guest-messages.ts";
 import { follow } from "./live.ts";
 import { addRecent, isId, isRecent, parseList, type RecentOrder, toggleFavourite } from "./local.ts";
 import { needsOptions, openOptions } from "./options-sheet.ts";
@@ -898,6 +899,16 @@ function menuView(): void {
   cleanup.push(() => clearInterval(poll));
 }
 
+/** The cart's one banner when the counter is the only way to pay (D-101); its words come from the strings. */
+function payBanner(): HTMLElement {
+  return h(
+    "div",
+    { class: "pay-banner", role: "note", "data-testid": "pay-banner" },
+    h("span", { class: "pi" }, icon("money_bag")),
+    h("b", {}, catalog.payments.counterFirst === true ? t("payCounterFirst") : t("payCounterOnly")),
+  );
+}
+
 // ── Cart and placing the order ─────────────────────────────────────────────────────────────────────────────────────
 
 function cartView(): void {
@@ -1116,6 +1127,8 @@ function cartView(): void {
             inRoom() && payRow("room", "bell", t("payRoomTitle"), t("payRoomSub")),
           ),
         ],
+        // One way left to pay (D-101): no choice, one banner, so nobody hunts for a UPI button that is not there.
+        !catalog.payments.upi && !inRoom() && !editing && payBanner(),
         askName &&
           !editing &&
           card(
@@ -1341,6 +1354,25 @@ async function orderView(ref: OrderRef): Promise<void> {
   const counterKey = `ibow.counter.${order.id}`;
   const reviewedKey = `ibow.reviewed.${order.id}`;
   const editableLeft = () => (order.editableUntil === undefined ? 0 : order.editableUntil - Date.now());
+  // Messages to the staff (D-104): offered while the switch is on; a thread already started stays readable.
+  const messages =
+    catalog.messages === true || (order.messages?.length ?? 0) > 0
+      ? guestMessages({
+          send: async (body) =>
+            (
+              await api<{ order: CustomerOrderView }>("POST", `/api/orders/${encodeURIComponent(order.id)}/messages`, {
+                key: ref.key,
+                body,
+              })
+            ).order,
+          clock,
+          failureText,
+          sent: (o) => {
+            order = o;
+            render();
+          },
+        })
+      : undefined;
 
   function payment(): Child {
     const p = order.payment;
@@ -1355,8 +1387,22 @@ async function orderView(ref: OrderRef): Promise<void> {
         ? card({ class: "pay paid" }, h("p", {}, t("paid")))
         : card({ class: "pay" }, h("p", {}, t("stillToPay", { amount: money(order.outstandingMinor) })));
     }
-    if (p.state === "claimed")
-      return card({ class: "pay claimed" }, h("p", {}, t("claimedNote", { amount: money(p.amountMinor) })));
+    if (p.state === "claimed") {
+      // A claim is not a confirmation: under counter-first the kitchen still waits for the counter (D-101).
+      return card(
+        { class: "pay claimed" },
+        h("p", {}, t("claimedNote", { amount: money(p.amountMinor) })),
+        order.paysFirst === true && h("p", { class: "muted", "data-testid": "claimed-first" }, t("claimedFirst")),
+      );
+    }
+    // Counter-first and no UPI: the counter is the only way, and the kitchen waits for it (D-101).
+    if (order.paysFirst === true && !catalog.payments.upi) {
+      return card(
+        { class: "pay first", "data-testid": "pay-first" },
+        h("p", {}, h("b", {}, t("payCounterFirst"))),
+        h("p", { class: "muted" }, t("toPay"), " ", money(order.outstandingMinor)),
+      );
+    }
     if (catalog.payments.upi && kv.get(counterKey) !== "1" && order.status !== "completed") {
       return upiPanel(
         order,
@@ -1635,6 +1681,7 @@ async function orderView(ref: OrderRef): Promise<void> {
       ),
     );
     slot(slots.review, `${order.status}|${kv.get(reviewedKey) ?? ""}`, review);
+    messages?.update(order);
   }
 
   const ticket = h(
@@ -1685,6 +1732,7 @@ async function orderView(ref: OrderRef): Promise<void> {
           { class: "page" },
           card({}, slots.tracker),
           slots.payment,
+          messages?.el,
           eventLineSlot(),
           slots.edit,
           slots.actions,
@@ -1718,10 +1766,13 @@ async function orderView(ref: OrderRef): Promise<void> {
     after,
     onEvent: (e) => {
       const before = shown(order);
+      const replies = (order.messages ?? []).filter((m) => m.from === "staff").length;
       order = e.order;
       if (shown(order) !== before) {
         announce(t("alertTitle", { token: order.token }), statusText(shown(order), order.spot));
       }
+      const reply = (order.messages ?? []).filter((m) => m.from === "staff").at(replies);
+      if (reply !== undefined) announce(t("replyTitle", { token: order.token }), guestMessageText(reply));
       render();
       // Orders ahead changes as other orders finish; the snapshot route is the one place that counts them.
       void api<{ ahead?: number }>("GET", `/api/orders/${encodeURIComponent(ref.id)}`, { key: ref.key }).then(
@@ -1856,7 +1907,9 @@ function kioskDone(order: CustomerOrderView): void {
             { class: "pay" },
             order.payment.state === "claimed"
               ? t("claimedNote", { amount: money(order.payment.amountMinor) })
-              : t("payAtCounter", { amount: money(order.totalMinor) }),
+              : order.paysFirst === true
+                ? t("payCounterFirst")
+                : t("payAtCounter", { amount: money(order.totalMinor) }),
           ),
           h("p", {}, t("listenForToken")),
           countdown,

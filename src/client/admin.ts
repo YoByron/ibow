@@ -36,7 +36,7 @@ interface Hub {
 
 interface FlagRow {
   key: string;
-  scope: "look" | "system";
+  scope: "look" | "system" | "ops";
   kind: "boolean" | "number" | "choice";
   what: string;
   value: boolean | number | string;

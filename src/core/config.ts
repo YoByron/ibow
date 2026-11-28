@@ -549,8 +549,17 @@ export function parseStations(raw: unknown, catalog: Catalog, file = "stations.j
 /**
  * `spots.json`: an array of zones (empty when the business has no spots), each `{id, name}` with either `spots: ["Hammock", "Corner"]` or `count: 12` (and an
  * optional `prefix`, so `prefix: "T", count: 3` is T1, T2, T3). A spot's label is the zone's name and its own: "Garden T4".
+ * `emptyZones` lets a zone list no spots yet: a section the owner has just added at run time (D-102).
  */
-export function parseSpots(raw: unknown, file = "spots.json"): Zone[] {
+/**
+ * `emptyZones`: a zone may have no spots yet. `keepIds`: a spot may come as `{id, name}`, keeping an id it was given
+ * before (a spot renamed in the sections editor keeps its id, so its printed QR card still picks it, D-102).
+ */
+export function parseSpots(
+  raw: unknown,
+  file = "spots.json",
+  opts: { emptyZones?: boolean; keepIds?: boolean } = {},
+): Zone[] {
   const r = new Reader(file);
   const zoneIds = new Set<string>();
   const spotIds = new Set<string>();
@@ -567,25 +576,30 @@ export function parseSpots(raw: unknown, file = "spots.json"): Zone[] {
     if ((zo.spots !== undefined) === (zo.count !== undefined)) {
       r.failText(zf, "exactly one of spots or count", zo.spots === undefined ? "neither" : "both");
     }
-    let own: string[];
+    let own: { label: string; id?: string }[];
     if (zo.spots !== undefined) {
-      own = r.array(zo.spots, `${zf}.spots`, true).map((s, i) => r.string(s, `${zf}.spots[${i}]`));
+      own = r.array(zo.spots, `${zf}.spots`, opts.emptyZones !== true).map((s, i) => {
+        const field = `${zf}.spots[${i}]`;
+        if (opts.keepIds !== true || typeof s !== "object" || s === null) return { label: r.string(s, field) };
+        const so = r.object(s, field);
+        return { label: r.string(so.name, `${field}.name`), id: r.id(so.id, `${field}.id`) };
+      });
     } else {
       const n = zo.count;
       if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > 500) {
         return r.fail(`${zf}.count`, "a whole number from 1 to 500", n);
       }
       const prefix = zo.prefix === undefined ? "" : r.string(zo.prefix, `${zf}.prefix`);
-      own = Array.from({ length: n }, (_, i) => `${prefix}${i + 1}`);
+      own = Array.from({ length: n }, (_, i) => ({ label: `${prefix}${i + 1}` }));
     }
-    const spots = own.map((label, i): Spot => {
+    const spots = own.map(({ label, id: kept }, i): Spot => {
       const slug = label
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "");
       const field = `${zf}.spots[${i}]`;
       if (slug === "") r.fail(field, "a label with a letter or digit", label);
-      const spot = { id: `${id}-${slug}`, label: `${name} ${label}` };
+      const spot = { id: kept ?? `${id}-${slug}`, label: `${name} ${label}` };
       r.unique(spotIds, spot.id, field, "spot within the config");
       r.unique(labels, spot.label, field, "spot label");
       return spot;

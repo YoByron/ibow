@@ -83,6 +83,18 @@ export function hubLinks(input: HubInput): HubLink[] {
       group: "staff",
       power: "orders.run",
     },
+    ...(input.hasSpots
+      ? [
+          {
+            id: "floor",
+            href: "/staff#/floor",
+            title: "Floor",
+            what: "Every section's tables coloured by what is happening there, and who runs each section today",
+            group: "staff",
+            power: "orders.run",
+          } satisfies HubLink,
+        ]
+      : []),
     ...(input.hasRooms
       ? [
           {
@@ -103,6 +115,24 @@ export function hubLinks(input: HubInput): HubLink[] {
       group: "manager",
       power: "menu.switch",
     },
+    {
+      id: "sections",
+      href: "/staff#/sections",
+      title: "Sections",
+      what: "Add, rename and delete the table sections and their spots; rooms stay as spots.json sets them",
+      group: "manager",
+      power: "sections.edit",
+    },
+    // One link to the one switches page: the page shows each person the scopes their level may flip (the owner also the
+    // look and menu switches), so a second link to the same page would only repeat it.
+    {
+      id: "switches",
+      href: "/admin#/switches",
+      title: "Switches",
+      what: "UPI, counter first, guest messages and sections (and for the owner the look and menu switches), changed while the install runs, with who changed what",
+      group: "manager",
+      power: "flags.ops",
+    },
     owner("today", "", "Today", "Sales so far, the busiest hour, what to prepare, and the day against yesterday"),
     owner(
       "orders",
@@ -118,14 +148,6 @@ export function hubLinks(input: HubInput): HubLink[] {
       ? [owner("spots", "spots", "Spots and QR sheet", "Where customers sit, and a printable QR for each", "look.edit")]
       : []),
     owner("appearance", "appearance", "Appearance", "Colours, header, logo and the look's switches", "look.edit"),
-    {
-      id: "switches",
-      href: "/admin#/switches",
-      title: "Switches",
-      what: "Look and menu switches, changed while the install runs, with who changed what and when",
-      group: "owner",
-      power: "flags.look",
-    },
     {
       id: "health",
       href: "/admin#/health",
@@ -157,7 +179,8 @@ export function linksFor(
   return links.filter((l) => {
     if (l.power === undefined) return true;
     if (level === undefined || !can(level, l.power)) return false;
-    if (access === "station" && (l.id === "counter" || l.id === "runner" || l.id === "rooms")) return false;
+    if (access === "station" && (l.id === "counter" || l.id === "runner" || l.id === "rooms" || l.id === "floor"))
+      return false;
     return true;
   });
 }

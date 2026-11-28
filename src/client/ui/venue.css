@@ -8,3 +8,30 @@
 .line .note,.lines .note{display:block;font-size:12.5px;font-style:italic}
 .spot-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:var(--r-pill);background:var(--primary-soft);font-weight:700;font-size:13px}
 .late{border-color:var(--err);border-width:2px}
+/* The floor (D-103): a block per section, a tile per spot coloured by state. Tokens only. */
+.fl-section{background:var(--card);border-radius:var(--r-card);box-shadow:var(--sh-1);padding:var(--sp-3);margin-top:var(--sp-3)}
+.fl-head{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.fl-head h2{margin:0;font-size:17px}
+.fl-head select{min-height:40px;max-width:55%;padding:0 8px;border-radius:var(--r-ctl);border:1px solid var(--line);background:var(--card-2);color:var(--ink);font:inherit}
+.fl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:8px;margin-top:var(--sp-3)}
+.fl-spot{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:64px;border-radius:var(--r-ctl);border:2px solid var(--line);background:var(--card-2);color:var(--ink);font:inherit;cursor:pointer}
+.fl-spot b{font-size:16px}
+.fl-spot small{font-size:11px;color:var(--ink-2)}
+.fl-spot.fl-ordered{background:var(--primary-soft);border-color:var(--primary-text)}
+.fl-spot.fl-ready{background:var(--ok-soft);border-color:var(--ok)}
+.fl-spot.fl-late{background:var(--warn-soft);border-color:var(--err)}
+.fl-spot.fl-late small{color:var(--warn-text)}
+.fl-spot.fl-message{background:var(--accent-soft);border-color:var(--accent)}
+.fl-orders{padding:0 var(--sp-4) var(--sp-4)}
+.fl-order+.fl-order{margin-top:var(--sp-3)}
+/* Runner: My sections and All (D-103); the sections editor (D-102). */
+.run-scope{display:flex;gap:8px;margin:var(--sp-2) 0}
+.run-group{font-size:15px;margin:var(--sp-3) 0 var(--sp-2);color:var(--ink-2)}
+.sec-card{background:var(--card);border-radius:var(--r-card);box-shadow:var(--sh-1);padding:var(--sp-3);margin-top:var(--sp-3)}
+.sec-head{display:flex;gap:8px;align-items:center}
+.sec-head input{flex:1;font-weight:700}
+.sec-spots{list-style:none;padding:0;margin:var(--sp-2) 0}
+.sec-spots li{display:flex;gap:8px;align-items:center;margin-top:6px}
+.sec-spots input{flex:1}
+.sec-card input{min-height:40px;padding:0 10px;border-radius:var(--r-ctl);border:1px solid var(--line);background:var(--card-2);color:var(--ink);font:inherit}
+.sec-actions{display:flex;gap:8px;justify-content:space-between;margin-top:var(--sp-3)}

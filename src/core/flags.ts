@@ -1,16 +1,16 @@
 /**
  * Feature flags (D-075): switches an install's people may change while it runs. Two scopes, by who may flip them: `look`
  * (the theme's features, which are the menu's and the storefront's switches) belong to the owner; `system` ones belong to the
- * admin. The definitions and the checks are pure; where values live and who flipped them is the store's and the server's.
+ * admin; `ops` ones (D-101) belong to the manager and the owner. The definitions and the checks are pure; where values live and who flipped them is the store's and the server's.
  */
 
 import { TAG_MODES, type Theme, TILE_MODES } from "./theme.ts";
 
 export type FlagValue = boolean | number | string;
-export type FlagScope = "look" | "system";
+export type FlagScope = "look" | "system" | "ops";
 
 export interface FlagDef {
-  /** `ai`, `retentionDays`, `showcase`; or `features.<name>` for a look flag. */
+  /** `ai`, `retentionDays`, `showcase`; `ops.<name>` for an operations switch; or `features.<name>` for a look flag. */
   key: string;
   scope: FlagScope;
   kind: "boolean" | "number" | "choice";
@@ -38,6 +38,27 @@ export const SYSTEM_FLAGS: readonly FlagDef[] = [
   },
   { key: "showcase", scope: "system", kind: "boolean", what: "Serve the ibow showcase page at /showcase" },
 ];
+
+/** The operations switches (D-101): how the floor runs today, flipped by the manager or the owner. */
+export const OPS_FLAGS: readonly FlagDef[] = [
+  { key: "ops.upi", scope: "ops", kind: "boolean", what: "Guests may pay by UPI; on only where UPI is set up" },
+  {
+    key: "ops.counterFirst",
+    scope: "ops",
+    kind: "boolean",
+    what: "Orders reach the stations only once the counter has confirmed payment; room-bill orders go straight through",
+  },
+  { key: "ops.messages", scope: "ops", kind: "boolean", what: "Guests may message their runner" },
+  { key: "ops.sections", scope: "ops", kind: "boolean", what: "Runners see their own sections first" },
+];
+
+/** Each operations switch's value until someone flips it: off only where on would change how an install already runs. */
+export const OPS_DEFAULTS: Readonly<Record<string, boolean>> = {
+  "ops.upi": true,
+  "ops.counterFirst": false,
+  "ops.messages": true,
+  "ops.sections": true,
+};
 
 const LOOK_WHAT: Record<string, string> = {
   favourites: "Customers may star items",
